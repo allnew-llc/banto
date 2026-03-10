@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 banto - Budget-gated API key vault for LLM applications.
 
@@ -13,6 +15,7 @@ can be plugged in via the SecretBackend protocol.
 from .backend import SecretBackend
 from .guard import CostGuard, BudgetExceededError
 from .keychain import KeychainStore, KeyNotFoundError
+from .profiles import ProfileManager
 from .vault import SecureVault
 
 __all__ = [
@@ -22,5 +25,6 @@ __all__ = [
     "BudgetExceededError",
     "KeychainStore",
     "KeyNotFoundError",
+    "ProfileManager",
 ]
 __version__ = "2.2.0"

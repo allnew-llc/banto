@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.0 (2026-03-10)
+
+- **New: budget-based profile recommendation**: `CostGuard.recommend_profile()` returns "quality" (>50% remaining), "balanced" (>20%), or "budget" (<=20%). Displayed in `banto status` output
+- **New: hold timeout (stale hold cleanup)**: Holds older than `hold_timeout_hours` (default 24h) are automatically voided during budget operations. Voided entries preserved for audit trail with `status: "voided_timeout"`. Configurable via `config.json`
+- **New: model profile configuration**: Named profiles (quality/balanced/budget) map task roles (chat/verify/embed) to specific models. `vault.get_key(role="chat")` resolves through active profile. Direct `model=` specification takes priority
+- **New: `ProfileManager` class** in `banto/profiles.py`: manages profile definitions, active profile switching, and role-to-model resolution
+- **New: `banto profile` CLI command**: view all profiles or switch active profile
+- **New: `banto status` enhancements**: shows recommended profile and stale hold summary
+- Backward compatible: all existing APIs unchanged
+
 ## 2.2.0 (2026-03-10)
 
 - **Separate pricing file**: Pricing table moved from `config.json` to dedicated `pricing.json` for independent updates. Backward compatible (inline `"pricing"` key still supported)

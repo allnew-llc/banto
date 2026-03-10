@@ -1,7 +1,14 @@
 {
   "monthly_limit_usd": 0,
+  "hold_timeout_hours": 24,
   "provider_limits": {},
   "model_limits": {},
+  "model_profiles": {
+    "quality": {"chat": "claude-opus-4-6", "verify": "claude-sonnet-4-6", "embed": "text-embedding-3-large"},
+    "balanced": {"chat": "claude-sonnet-4-6", "verify": "claude-haiku-4-5", "embed": "text-embedding-3-small"},
+    "budget": {"chat": "claude-haiku-4-5", "verify": "claude-haiku-4-5", "embed": "text-embedding-3-small"}
+  },
+  "active_profile": "balanced",
   "providers": {
     "openai": {
       "models": [

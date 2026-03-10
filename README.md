@@ -255,7 +255,7 @@ banto uses a **pessimistic reservation** (hold/settle) pattern for budget enforc
 
 1. **Hold**: `get_key()` estimates the cost and writes a hold entry to the usage log *before* returning the key. The held amount counts against the budget immediately.
 2. **Settle**: `record_usage()` finds the matching hold and replaces it with the actual cost. If actual < estimated, the surplus budget is freed.
-3. **Safe-side bias**: If `record_usage()` is never called (crash, timeout, bug), the hold stays. Budget is never silently leaked.
+3. **Safe-side bias**: If `record_usage()` is never called (crash, timeout, bug), the hold stays. The hold pattern is designed to prevent silent budget leakage.
 
 This closes the metering gap where an agent could call `get_key()` but skip `record_usage()`, consuming API resources without being tracked.
 
@@ -272,7 +272,7 @@ Three layers are checked on every `get_key()` call (all must pass):
 - Usage is logged per-call in `~/.config/banto/data/usage_YYYY_MM.json`
 - Budget resets automatically each month (new file per month)
 - Totals are recalculated from entries on every load (prevents drift)
-- File locking (`fcntl`) with atomic read-modify-write ensures process-safe concurrent access
+- File locking (`fcntl`) provides process-safe concurrent access via exclusive-lock read-modify-write
 
 ### Keychain storage
 
@@ -282,7 +282,7 @@ Three layers are checked on every `get_key()` call (all must pass):
 - Keys are never written to disk -- no `.env` files, no config files
 - Note: During `banto store`, the key is passed as a command-line argument to the `security` tool and is briefly visible in the process table. This is a limitation of the macOS `security` CLI.
 
-### Atomic get_key()
+### Budget-gated get_key()
 
 `get_key()` is the central mechanism. It performs three operations in sequence:
 
