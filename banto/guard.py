@@ -78,7 +78,6 @@ def _resolve_config_path(config_path: str | None) -> Path:
 def _resolve_pricing_path(config_dir: Path, pricing_file: str | None) -> Path:
     """Resolve pricing file path: user override > bundled default."""
     if pricing_file:
-        # Relative to config dir, or absolute
         candidate = Path(pricing_file)
         if not candidate.is_absolute():
             candidate = config_dir / pricing_file
@@ -151,13 +150,13 @@ class CostGuard:
         }
 
     def _load_usage(self) -> dict:
+        """Load usage data (read-only, shared lock)."""
         usage_path = self._get_usage_file_path()
         try:
-            with open(usage_path, "r+", encoding="utf-8") as f:
+            with open(usage_path, "r", encoding="utf-8") as f:
                 _lock_file(f, exclusive=False)
                 try:
                     data = json.load(f)
-                    # Recalculate totals from entries to prevent drift
                     data["total_usd"] = sum(
                         e.get("cost_usd", 0) for e in data.get("entries", [])
                     )
@@ -168,25 +167,55 @@ class CostGuard:
         except FileNotFoundError:
             return self._create_empty_usage()
         except (json.JSONDecodeError, KeyError):
-            backup_path = usage_path.with_suffix(".json.corrupted")
-            try:
-                usage_path.rename(backup_path)
-            except OSError:
-                pass
             return self._create_empty_usage()
 
-    def _save_usage(self, data: dict) -> None:
-        usage_path = self._get_usage_file_path()
-        data["total_usd"] = sum(
-            e.get("cost_usd", 0) for e in data.get("entries", [])
-        )
-        data["entry_count"] = len(data.get("entries", []))
+    def _update_usage(self, fn):
+        """Atomically read-modify-write the usage file.
 
-        fd = os.open(str(usage_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
-        with open(fd, "w", encoding="utf-8") as f:
+        Holds an exclusive file lock for the entire read-modify-write
+        cycle, ensuring process-safe concurrent access.
+
+        fn(data) should modify data in-place and return a result.
+        If fn raises, data is not written back.
+        """
+        usage_path = self._get_usage_file_path()
+        usage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fd = os.open(str(usage_path), os.O_RDWR | os.O_CREAT, 0o640)
+        with open(fd, "r+", encoding="utf-8") as f:
             _lock_file(f, exclusive=True)
             try:
+                content = f.read()
+                if content.strip():
+                    try:
+                        data = json.loads(content)
+                        data["total_usd"] = sum(
+                            e.get("cost_usd", 0)
+                            for e in data.get("entries", [])
+                        )
+                        data["entry_count"] = len(data.get("entries", []))
+                    except (json.JSONDecodeError, KeyError):
+                        backup = usage_path.with_suffix(".json.corrupted")
+                        try:
+                            backup.write_text(content, encoding="utf-8")
+                        except OSError:
+                            pass
+                        data = self._create_empty_usage()
+                else:
+                    data = self._create_empty_usage()
+
+                result = fn(data)
+
+                data["total_usd"] = sum(
+                    e.get("cost_usd", 0)
+                    for e in data.get("entries", [])
+                )
+                data["entry_count"] = len(data.get("entries", []))
+                f.seek(0)
+                f.truncate()
                 json.dump(data, f, indent=2, ensure_ascii=False)
+
+                return result
             finally:
                 _unlock_file(f)
 
@@ -200,7 +229,7 @@ class CostGuard:
         input_tokens: int | None = None,
         output_tokens: int | None = None,
     ) -> float:
-        if model.startswith("_comment"):
+        if model.startswith("_"):
             raise ValueError(f"Invalid model name: {model}")
 
         if model not in self.pricing:
@@ -373,76 +402,76 @@ class CostGuard:
             estimated = self._lookup_price(
                 model, quality, size, seconds, n, input_tokens, output_tokens
             )
-            usage = self._load_usage()
-            entries = usage.get("entries", [])
 
-            # Layer 1: global limit
-            used = usage["total_usd"]
-            remaining = self.monthly_limit_usd - used
-            if estimated > remaining:
-                raise BudgetExceededError(
-                    requested=estimated,
-                    remaining=remaining,
-                    limit=self.monthly_limit_usd,
-                )
+            def _do_hold(usage):
+                entries = usage.get("entries", [])
 
-            scoped = self._usage_by_scope(entries)
-
-            # Layer 2: provider limit
-            if provider and provider in self.provider_limits:
-                plimit = self.provider_limits[provider]
-                pused = scoped["by_provider"].get(provider, 0)
-                premaining = plimit - pused
-                if estimated > premaining:
+                # Layer 1: global limit
+                used = usage["total_usd"]
+                remaining = self.monthly_limit_usd - used
+                if estimated > remaining:
                     raise BudgetExceededError(
                         requested=estimated,
-                        remaining=premaining,
-                        limit=plimit,
-                        scope="provider",
-                        scope_name=provider,
+                        remaining=remaining,
+                        limit=self.monthly_limit_usd,
                     )
 
-            # Layer 3: model limit
-            if model in self.model_limits:
-                mlimit = self.model_limits[model]
-                mused = scoped["by_model"].get(model, 0)
-                mremaining = mlimit - mused
-                if estimated > mremaining:
-                    raise BudgetExceededError(
-                        requested=estimated,
-                        remaining=mremaining,
-                        limit=mlimit,
-                        scope="model",
-                        scope_name=model,
-                    )
+                scoped = self._usage_by_scope(entries)
 
-            # Write the hold entry
-            hold_id = f"h_{uuid.uuid4().hex[:12]}"
-            params: dict = {"n": n, "quality": quality, "size": size}
-            if seconds is not None:
-                params["seconds"] = seconds
-            if input_tokens is not None:
-                params["input_tokens"] = input_tokens
-            if output_tokens is not None:
-                params["max_output_tokens"] = output_tokens
+                # Layer 2: provider limit
+                if provider and provider in self.provider_limits:
+                    plimit = self.provider_limits[provider]
+                    pused = scoped["by_provider"].get(provider, 0)
+                    premaining = plimit - pused
+                    if estimated > premaining:
+                        raise BudgetExceededError(
+                            requested=estimated,
+                            remaining=premaining,
+                            limit=plimit,
+                            scope="provider",
+                            scope_name=provider,
+                        )
 
-            hold_entry = {
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "model": model,
-                "provider": provider,
-                "operation": "hold",
-                "status": "hold",
-                "hold_id": hold_id,
-                "params": params,
-                "cost_usd": estimated,
-                "cumulative_usd": used + estimated,
-                "caller": self.caller,
-            }
+                # Layer 3: model limit
+                if model in self.model_limits:
+                    mlimit = self.model_limits[model]
+                    mused = scoped["by_model"].get(model, 0)
+                    mremaining = mlimit - mused
+                    if estimated > mremaining:
+                        raise BudgetExceededError(
+                            requested=estimated,
+                            remaining=mremaining,
+                            limit=mlimit,
+                            scope="model",
+                            scope_name=model,
+                        )
 
-            usage["entries"].append(hold_entry)
-            self._save_usage(usage)
+                # Write the hold entry
+                hold_id = f"h_{uuid.uuid4().hex[:12]}"
+                params: dict = {"n": n, "quality": quality, "size": size}
+                if seconds is not None:
+                    params["seconds"] = seconds
+                if input_tokens is not None:
+                    params["input_tokens"] = input_tokens
+                if output_tokens is not None:
+                    params["output_tokens"] = output_tokens
 
-            return hold_id
+                usage["entries"].append({
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "model": model,
+                    "provider": provider,
+                    "operation": "hold",
+                    "status": "hold",
+                    "hold_id": hold_id,
+                    "params": params,
+                    "cost_usd": estimated,
+                    "cumulative_usd": used + estimated,
+                    "caller": self.caller,
+                })
+
+                return hold_id
+
+            return self._update_usage(_do_hold)
 
     def settle_hold(
         self,
@@ -465,66 +494,64 @@ class CostGuard:
         the actual cost. If actual < estimated, budget is freed.
         """
         with self._lock:
-            usage = self._load_usage()
-            entries = usage.get("entries", [])
+            def _do_settle(usage):
+                entries = usage.get("entries", [])
 
-            # Find the hold entry
-            hold_idx = None
-            for i, e in enumerate(entries):
-                if e.get("hold_id") == hold_id and e.get("status") == "hold":
-                    hold_idx = i
-                    break
+                hold_idx = None
+                for i, e in enumerate(entries):
+                    if e.get("hold_id") == hold_id and e.get("status") == "hold":
+                        hold_idx = i
+                        break
 
-            if hold_idx is None:
-                # Hold not found — fall back to normal record
-                return self._record_usage_locked(
-                    usage, model=model, n=n, seconds=seconds,
-                    quality=quality, size=size,
-                    input_tokens=input_tokens, output_tokens=output_tokens,
-                    provider=provider, operation=operation,
+                if hold_idx is None:
+                    return self._append_record(
+                        usage, model=model, n=n, seconds=seconds,
+                        quality=quality, size=size,
+                        input_tokens=input_tokens, output_tokens=output_tokens,
+                        provider=provider, operation=operation,
+                    )
+
+                hold_entry = entries[hold_idx]
+                actual_model = model or hold_entry.get("model", "")
+                actual_provider = provider or hold_entry.get("provider", "")
+                actual_cost = self._lookup_price(
+                    actual_model, quality, size, seconds, n,
+                    input_tokens, output_tokens,
                 )
 
-            hold_entry = entries[hold_idx]
-            actual_model = model or hold_entry.get("model", "")
-            actual_provider = provider or hold_entry.get("provider", "")
-            actual_cost = self._lookup_price(
-                actual_model, quality, size, seconds, n, input_tokens, output_tokens
-            )
+                params: dict = {"n": n, "quality": quality, "size": size}
+                if seconds is not None:
+                    params["seconds"] = seconds
+                if input_tokens is not None:
+                    params["input_tokens"] = input_tokens
+                if output_tokens is not None:
+                    params["output_tokens"] = output_tokens
 
-            params: dict = {"n": n, "quality": quality, "size": size}
-            if seconds is not None:
-                params["seconds"] = seconds
-            if input_tokens is not None:
-                params["input_tokens"] = input_tokens
-            if output_tokens is not None:
-                params["output_tokens"] = output_tokens
+                entries[hold_idx] = {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "model": actual_model,
+                    "provider": actual_provider,
+                    "operation": operation,
+                    "status": "settled",
+                    "hold_id": hold_id,
+                    "params": params,
+                    "cost_usd": actual_cost,
+                    "hold_cost_usd": hold_entry["cost_usd"],
+                    "caller": self.caller,
+                }
 
-            # Replace hold with settled entry
-            entries[hold_idx] = {
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "model": actual_model,
-                "provider": actual_provider,
-                "operation": operation,
-                "status": "settled",
-                "hold_id": hold_id,
-                "params": params,
-                "cost_usd": actual_cost,
-                "hold_cost_usd": hold_entry["cost_usd"],
-                "caller": self.caller,
-            }
+                total_used = sum(e.get("cost_usd", 0) for e in entries)
+                return {
+                    "cost_usd": actual_cost,
+                    "hold_cost_usd": hold_entry["cost_usd"],
+                    "saved_usd": hold_entry["cost_usd"] - actual_cost,
+                    "total_used_usd": total_used,
+                    "remaining_usd": self.monthly_limit_usd - total_used,
+                }
 
-            self._save_usage(usage)
+            return self._update_usage(_do_settle)
 
-            total_used = sum(e.get("cost_usd", 0) for e in entries)
-            return {
-                "cost_usd": actual_cost,
-                "hold_cost_usd": hold_entry["cost_usd"],
-                "saved_usd": hold_entry["cost_usd"] - actual_cost,
-                "total_used_usd": total_used,
-                "remaining_usd": self.monthly_limit_usd - total_used,
-            }
-
-    def _record_usage_locked(
+    def _append_record(
         self,
         usage: dict,
         *,
@@ -538,7 +565,7 @@ class CostGuard:
         provider: str = "",
         operation: str = "",
     ) -> dict:
-        """Internal: record usage entry (caller must hold self._lock)."""
+        """Append a usage entry to data (caller must be inside _update_usage)."""
         cost = self._lookup_price(
             model, quality, size, seconds, n, input_tokens, output_tokens
         )
@@ -563,7 +590,6 @@ class CostGuard:
         }
 
         usage["entries"].append(entry)
-        self._save_usage(usage)
 
         total_used = usage["total_usd"] + cost
         return {
@@ -587,13 +613,32 @@ class CostGuard:
     ) -> dict:
         """Record a completed API call. Called AFTER successful response."""
         with self._lock:
-            usage = self._load_usage()
-            return self._record_usage_locked(
-                usage, model=model, n=n, seconds=seconds,
-                quality=quality, size=size,
-                input_tokens=input_tokens, output_tokens=output_tokens,
-                provider=provider, operation=operation,
-            )
+            def _do_record(usage):
+                return self._append_record(
+                    usage, model=model, n=n, seconds=seconds,
+                    quality=quality, size=size,
+                    input_tokens=input_tokens, output_tokens=output_tokens,
+                    provider=provider, operation=operation,
+                )
+            return self._update_usage(_do_record)
+
+    def void_hold(self, hold_id: str) -> bool:
+        """Remove a hold entry, freeing its reserved budget.
+
+        Called when an operation fails after hold_budget() but before
+        the API call, to avoid permanently reserving budget.
+
+        Returns True if the hold was found and voided.
+        """
+        with self._lock:
+            def _do_void(usage):
+                entries = usage.get("entries", [])
+                for i, e in enumerate(entries):
+                    if e.get("hold_id") == hold_id and e.get("status") == "hold":
+                        entries.pop(i)
+                        return True
+                return False
+            return self._update_usage(_do_void)
 
     def get_remaining_budget(self) -> dict:
         """Get current budget status with per-provider and per-model breakdowns."""
@@ -611,7 +656,6 @@ class CostGuard:
                     "limit_usd": limit,
                     "remaining_usd": limit - used if limit is not None else None,
                 }
-            # Include providers with limits but no usage yet
             for p, limit in self.provider_limits.items():
                 if p not in provider_status:
                     provider_status[p] = {
@@ -659,6 +703,13 @@ class CostGuard:
         model_limit: float | None = None,
     ) -> None:
         """Update budget limits and persist to config file."""
+        if global_limit is not None and global_limit < 0:
+            raise ValueError("Budget limit cannot be negative")
+        if provider_limit is not None and provider_limit < 0:
+            raise ValueError("Provider budget limit cannot be negative")
+        if model_limit is not None and model_limit < 0:
+            raise ValueError("Model budget limit cannot be negative")
+
         with open(self.config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
 

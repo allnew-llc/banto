@@ -47,10 +47,10 @@ class KeychainStore:
                             Default: "banto" (keys stored as "banto-openai" etc.)
         """
         self.prefix = service_prefix or self.DEFAULT_PREFIX
-        result = subprocess.run(
-            ["whoami"], capture_output=True, text=True, check=True
-        )
-        self.account = result.stdout.strip()
+        try:
+            self.account = os.getlogin()
+        except OSError:
+            self.account = os.environ.get("USER", "unknown")
         self.keychain_path = os.path.expanduser(
             "~/Library/Keychains/login.keychain-db"
         )
@@ -129,8 +129,20 @@ class KeychainStore:
             return False
 
     def exists(self, provider: str) -> bool:
-        """Check if an API key exists in Keychain."""
-        return self.get(provider) is not None
+        """Check if an API key exists in Keychain (without retrieving it)."""
+        try:
+            result = subprocess.run(
+                [
+                    "security", "find-generic-password",
+                    "-s", self._service_name(provider),
+                    "-a", self.account,
+                    self.keychain_path,
+                ],
+                capture_output=True,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
 
     def list_providers(self, known_providers: list[str]) -> list[str]:
         """List which of the known providers have stored keys."""

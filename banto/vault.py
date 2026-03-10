@@ -72,7 +72,7 @@ class SecureVault:
         )
         self._provider_map = self._build_provider_map()
         self._holds_lock = threading.Lock()
-        self._pending_holds: dict[str, str] = {}  # "model:provider" -> hold_id
+        self._pending_holds: dict[str, list[str]] = {}  # "model:provider" -> [hold_ids]
 
     def _build_provider_map(self) -> dict[str, str]:
         """Build model -> provider mapping from config."""
@@ -163,12 +163,14 @@ class SecureVault:
         # Step 2: key retrieval (only reached if budget allows)
         key = self._backend.get(resolved)
         if key is None:
+            # Roll back the hold to free reserved budget
+            self._guard.void_hold(hold_id)
             raise KeyNotFoundError(resolved)
 
-        # Track hold for later settlement
+        # Track hold for later settlement (FIFO per model:provider)
         hold_key = f"{model}:{resolved}"
         with self._holds_lock:
-            self._pending_holds[hold_key] = hold_id
+            self._pending_holds.setdefault(hold_key, []).append(hold_id)
 
         return key
 
@@ -194,13 +196,17 @@ class SecureVault:
         actual cost, freeing any surplus budget. Otherwise falls back
         to a direct usage record.
         """
-        resolved = provider or self._provider_map.get(model, "")
+        resolved = provider or self._provider_map.get(model, provider)
         hold_key = f"{model}:{resolved}"
 
-        # Pop matching hold
+        # Pop matching hold (FIFO)
         hold_id: str | None = None
         with self._holds_lock:
-            hold_id = self._pending_holds.pop(hold_key, None)
+            holds = self._pending_holds.get(hold_key, [])
+            if holds:
+                hold_id = holds.pop(0)
+                if not holds:
+                    del self._pending_holds[hold_key]
 
         if hold_id:
             return self._guard.settle_hold(

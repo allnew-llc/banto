@@ -272,19 +272,19 @@ Three layers are checked on every `get_key()` call (all must pass):
 - Usage is logged per-call in `~/.config/banto/data/usage_YYYY_MM.json`
 - Budget resets automatically each month (new file per month)
 - Totals are recalculated from entries on every load (prevents drift)
-- File locking (`fcntl`) ensures process-safe concurrent access
+- File locking (`fcntl`) with atomic read-modify-write ensures process-safe concurrent access
 
 ### Keychain storage
 
 - Keys are stored as generic passwords in the login keychain
 - Service name format: `banto-<provider>` (e.g., `banto-openai`)
-- Uses the macOS `security` CLI tool (no native bindings needed)
+- Uses the macOS `security` CLI tool (no native bindings needed); account name resolved via `os.getlogin()`
 - Keys are never written to disk -- no `.env` files, no config files
 - Note: During `banto store`, the key is passed as a command-line argument to the `security` tool and is briefly visible in the process table. This is a limitation of the macOS `security` CLI.
 
 ### Atomic get_key()
 
-`get_key()` is the central mechanism. It combines three operations into one:
+`get_key()` is the central mechanism. It performs three operations in sequence:
 
 1. Check if estimated cost fits within remaining budget (global + provider + model)
 2. Write a hold entry reserving that cost in the usage log
