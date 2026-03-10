@@ -2,13 +2,13 @@
 
 # banto
 
-Budget-gated API key vault for LLM applications on macOS.
+Structurally prevents excessive API charges caused by unexpectedly running LLM agents. A budget-gated API key vault for macOS.
 
 > Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
 ## Problem
 
-LLM agents can exceed API budgets unchecked. Traditional budget checks are advisory -- the agent can catch the exception and call the API regardless, because the API key is already available in the environment.
+LLM agents can exceed API budgets unchecked. Traditional budget checks are advisory -- the agent can catch the exception and call the API regardless, because the API key is already available in the environment. When agents run unexpectedly, this can result in significant charges.
 
 ## Solution
 
