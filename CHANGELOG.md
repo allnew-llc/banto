@@ -14,3 +14,4 @@ Initial public release.
 - Process-safe concurrent access via `fcntl.flock()` + `threading.Lock()`
 - Monthly auto-reset (usage files per month)
 - Provider-to-model mapping for automatic key resolution
+- **Dual license**: Free for individuals, commercial license required for organizations

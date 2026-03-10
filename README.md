@@ -315,4 +315,9 @@ guard.record_usage(model="dall-e-3", n=1, provider="openai", operation="image")
 
 ## License
 
-Apache 2.0
+Dual license:
+
+- **Personal use** (free): Individuals may use, modify, and redistribute banto at no cost for personal, educational, and research purposes.
+- **Commercial use** (paid): Organizations and companies require a commercial license from [AllNew LLC](https://github.com/allnew-llc/banto/issues).
+
+See [LICENSE](./LICENSE) for full terms.

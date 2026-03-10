@@ -315,4 +315,9 @@ guard.record_usage(model="dall-e-3", n=1, provider="openai", operation="image")
 
 ## ライセンス
 
-Apache 2.0
+デュアルライセンス:
+
+- **個人利用**（無料）: 個人の方は、個人・教育・研究目的で無償で利用・改変・再配布できます。
+- **商用利用**（有料）: 企業・組織での利用には、[AllNew LLC](https://github.com/allnew-llc/banto/issues) との商用ライセンス契約が必要です。
+
+詳細は [LICENSE](./LICENSE) をご参照ください。

@@ -7,7 +7,7 @@ name = "banto"
 version = "2.0.0"
 description = "Budget-gated API key vault for LLM applications on macOS"
 readme = "README.md"
-license = "Apache-2.0"
+license = "LicenseRef-Dual"
 requires-python = ">=3.10"
 authors = [{ name = "AllNew LLC" }]
 keywords = ["llm", "api", "budget", "keychain", "macos", "security"]
