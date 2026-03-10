@@ -2,7 +2,7 @@
 
 # banto
 
-Structurally prevents excessive API charges caused by unexpectedly running LLM agents. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) -- not in `.env` files or environment variables -- and released only when the budget allows.
+A budget-gated API key vault designed to limit excessive API charges caused by unexpectedly running LLM agents. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) -- not in `.env` files or environment variables -- and released only when the budget allows.
 
 > Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
@@ -257,16 +257,17 @@ Three layers are checked on every `get_key()` call (all must pass):
 - Service name format: `banto-<provider>` (e.g., `banto-openai`)
 - Uses the macOS `security` CLI tool (no native bindings needed)
 - Keys are never written to disk -- no `.env` files, no config files
+- Note: During `banto store`, the key is passed as a command-line argument to the `security` tool and is briefly visible in the process table. This is a limitation of the macOS `security` CLI.
 
 ### Atomic get_key()
 
-`get_key()` is the core innovation. It combines three operations into one:
+`get_key()` is the central mechanism. It combines three operations into one:
 
 1. Check if estimated cost fits within remaining budget (global + provider + model)
 2. Write a hold entry reserving that cost in the usage log
 3. Retrieve the API key from Keychain
 
-If step 1 fails, steps 2-3 never execute. The key is inaccessible through banto's API when over budget. An LLM agent using banto's `get_key()` cannot bypass this -- the key is never returned.
+If step 1 fails, steps 2-3 never execute. When over budget, the key is inaccessible through banto's API. An LLM agent that uses only banto's `get_key()` has no code path to obtain the key.
 
 > **Threat model note**: banto protects against agents that access keys exclusively through `get_key()`. An agent with direct shell access could query macOS Keychain independently. For defense-in-depth, restrict shell access in your agent runtime.
 
