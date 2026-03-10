@@ -12,6 +12,7 @@ Uses a hold/settle pattern for pessimistic budget reservation:
 
 import threading
 
+from .backend import SecretBackend
 from .guard import CostGuard, BudgetExceededError
 from .keychain import KeychainStore, KeyNotFoundError
 
@@ -20,15 +21,18 @@ class SecureVault:
     """
     Budget-gated API key vault.
 
-    Combines macOS Keychain storage with monthly budget enforcement.
+    Combines secret storage with monthly budget enforcement.
     ``get_key()`` reserves budget and retrieves the key atomically.
     ``record_usage()`` settles the reservation with actual cost.
+
+    The secret backend is pluggable. By default, macOS Keychain is used.
+    Pass ``backend=`` to use 1Password, env vars, or any custom store.
 
     Usage:
         vault = SecureVault(caller="my_mcp")
 
-        # One-time setup
-        vault.store_key("openai", "sk-...")
+        # Or with a custom backend:
+        vault = SecureVault(caller="my_mcp", backend=my_1password_backend)
 
         # Main loop: get_key() holds budget, record_usage() settles
         key = vault.get_key(model="gpt-4o",
@@ -45,6 +49,7 @@ class SecureVault:
         self,
         caller: str = "unknown",
         *,
+        backend: SecretBackend | None = None,
         config_path: str | None = None,
         data_dir: str | None = None,
         keychain_prefix: str | None = None,
@@ -52,14 +57,19 @@ class SecureVault:
         """
         Args:
             caller: Identifier for the service using this vault.
+            backend: Secret storage backend. Defaults to macOS KeychainStore.
+                     Any object implementing SecretBackend protocol works.
             config_path: Path to config.json (optional override).
             data_dir: Path to usage data directory (optional override).
             keychain_prefix: Keychain service name prefix (default: "banto").
+                             Ignored when backend is provided.
         """
         self._guard = CostGuard(
             config_path=config_path, caller=caller, data_dir=data_dir
         )
-        self._keychain = KeychainStore(service_prefix=keychain_prefix)
+        self._backend: SecretBackend = backend or KeychainStore(
+            service_prefix=keychain_prefix
+        )
         self._provider_map = self._build_provider_map()
         self._holds_lock = threading.Lock()
         self._pending_holds: dict[str, str] = {}  # "model:provider" -> hold_id
@@ -86,20 +96,20 @@ class SecureVault:
 
     def store_key(self, provider: str, api_key: str) -> bool:
         """Store an API key in Keychain."""
-        return self._keychain.store(provider, api_key)
+        return self._backend.store(provider, api_key)
 
     def delete_key(self, provider: str) -> bool:
         """Delete an API key from Keychain."""
-        return self._keychain.delete(provider)
+        return self._backend.delete(provider)
 
     def has_key(self, provider: str) -> bool:
         """Check if a provider has a stored key."""
-        return self._keychain.exists(provider)
+        return self._backend.exists(provider)
 
     def list_providers(self) -> list[str]:
         """List providers that have stored keys."""
         known = sorted(set(self._provider_map.values()))
-        return self._keychain.list_providers(known)
+        return self._backend.list_providers(known)
 
     # --- Core: budget-gated key access ---
 
@@ -151,7 +161,7 @@ class SecureVault:
         )
 
         # Step 2: key retrieval (only reached if budget allows)
-        key = self._keychain.get(resolved)
+        key = self._backend.get(resolved)
         if key is None:
             raise KeyNotFoundError(resolved)
 

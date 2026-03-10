@@ -2,7 +2,7 @@
 
 # banto
 
-Structurally prevents excessive API charges caused by unexpectedly running LLM agents. API keys are stored in macOS Keychain -- not in `.env` files or environment variables -- and released only when the budget allows.
+Structurally prevents excessive API charges caused by unexpectedly running LLM agents. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) -- not in `.env` files or environment variables -- and released only when the budget allows.
 
 > Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
@@ -252,6 +252,104 @@ If step 1 fails, steps 2-3 never execute. The key is inaccessible through banto'
 
 > **Threat model note**: banto protects against agents that access keys exclusively through `get_key()`. An agent with direct shell access could query macOS Keychain independently. For defense-in-depth, restrict shell access in your agent runtime.
 
+## Custom backends
+
+The secret storage is pluggable via the `SecretBackend` protocol. Any object with `get`, `store`, `delete`, `exists`, and `list_providers` methods works. No inheritance required.
+
+### Environment variables
+
+```python
+import os
+from banto import SecureVault
+
+class EnvVarBackend:
+    """Read API keys from BANTO_KEY_<PROVIDER> environment variables."""
+
+    def get(self, provider: str) -> str | None:
+        return os.environ.get(f"BANTO_KEY_{provider.upper()}")
+
+    def store(self, provider: str, api_key: str) -> bool:
+        os.environ[f"BANTO_KEY_{provider.upper()}"] = api_key
+        return True
+
+    def delete(self, provider: str) -> bool:
+        return os.environ.pop(f"BANTO_KEY_{provider.upper()}", None) is not None
+
+    def exists(self, provider: str) -> bool:
+        return f"BANTO_KEY_{provider.upper()}" in os.environ
+
+    def list_providers(self, known_providers: list[str]) -> list[str]:
+        return [p for p in known_providers if self.exists(p)]
+
+vault = SecureVault(caller="my_app", backend=EnvVarBackend())
+```
+
+### 1Password CLI
+
+```python
+import json
+import subprocess
+from banto import SecureVault
+
+class OnePasswordBackend:
+    """Retrieve API keys from 1Password using the `op` CLI."""
+
+    def __init__(self, vault_name: str = "Private"):
+        self.vault_name = vault_name
+
+    def get(self, provider: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["op", "item", "get", f"banto-{provider}",
+                 "--vault", self.vault_name,
+                 "--fields", "label=credential", "--format", "json"],
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                return json.loads(result.stdout).get("value")
+        except (subprocess.SubprocessError, OSError):
+            pass
+        return None
+
+    def store(self, provider: str, api_key: str) -> bool: ...
+    def delete(self, provider: str) -> bool: ...
+    def exists(self, provider: str) -> bool:
+        return self.get(provider) is not None
+    def list_providers(self, known_providers: list[str]) -> list[str]:
+        return [p for p in known_providers if self.exists(p)]
+
+vault = SecureVault(caller="my_app", backend=OnePasswordBackend())
+```
+
+### In-memory (for testing)
+
+```python
+from banto import SecureVault
+
+class InMemoryBackend:
+    def __init__(self, keys: dict[str, str] | None = None):
+        self._store = dict(keys) if keys else {}
+
+    def get(self, provider: str) -> str | None:
+        return self._store.get(provider)
+    def store(self, provider: str, api_key: str) -> bool:
+        self._store[provider] = api_key
+        return True
+    def delete(self, provider: str) -> bool:
+        return self._store.pop(provider, None) is not None
+    def exists(self, provider: str) -> bool:
+        return provider in self._store
+    def list_providers(self, known_providers: list[str]) -> list[str]:
+        return [p for p in known_providers if p in self._store]
+
+vault = SecureVault(
+    caller="test",
+    backend=InMemoryBackend({"openai": "test-key-12345"}),
+)
+```
+
+See [examples/06_custom_backend.py](./examples/06_custom_backend.py) for complete implementations.
+
 ## Advanced
 
 ### Custom Keychain prefix
@@ -287,7 +385,7 @@ key = vault.get_key(
 )
 ```
 
-### Using CostGuard directly (without Keychain)
+### Using CostGuard directly (without secret storage)
 
 For budget tracking only, with hold/settle:
 

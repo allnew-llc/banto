@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0 (2026-03-10)
+
+- **Pluggable secret backends**: `SecretBackend` protocol allows swapping macOS Keychain for 1Password, environment variables, or any custom store via `SecureVault(backend=...)`
+- New export: `SecretBackend` protocol class
+- New example: `examples/06_custom_backend.py` (EnvVar, 1Password, InMemory)
+- Backward compatible: existing code using `keychain_prefix=` continues to work
+
 ## 2.0.0 (2026-03-10)
 
 Initial public release.
