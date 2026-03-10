@@ -1,5 +1,5 @@
 {
-  "monthly_limit_usd": 50.00,
+  "monthly_limit_usd": 0,
   "provider_limits": {},
   "model_limits": {},
   "providers": {

@@ -59,7 +59,17 @@ pip install -e .
 banto init    # copies default config to ~/.config/banto/
 ```
 
-### 2. Store API keys
+### 2. Set your monthly budget
+
+The default budget is **$0 (USD)** — all API calls are blocked until you set a limit. This is intentional: banto requires an explicit budget decision before any key is released.
+
+```bash
+banto budget 50    # set global monthly limit to $50 USD
+```
+
+All budgets are denominated in **US dollars (USD)** and enforced on a **calendar month** basis. The budget resets automatically on the 1st of each month.
+
+### 3. Store API keys
 
 ```bash
 banto store openai
@@ -155,9 +165,11 @@ Default config is at `~/.config/banto/config.json`. Run `banto init` to create i
 
 ### Budget limit
 
+All budgets are in **USD**, enforced per **calendar month**. The default is `0` — you must set a limit before any key can be retrieved.
+
 ```json
 {
-  "monthly_limit_usd": 50.00
+  "monthly_limit_usd": 0
 }
 ```
 
@@ -416,6 +428,12 @@ guard.check_budget(model="dall-e-3", n=1, quality="standard", size="1024x1024")
 # ... call API ...
 guard.record_usage(model="dall-e-3", n=1, provider="openai", operation="image")
 ```
+
+## Disclaimer
+
+banto is a budget management aid, not a guarantee against excessive API charges. The authors shall not be liable for any financial losses arising from inaccurate pricing tables, software defects, configuration errors, or agents that bypass banto's API. Users are solely responsible for monitoring actual API spend through each provider's billing dashboard and for keeping the pricing table up to date.
+
+See [LICENSE](./LICENSE) for full terms.
 
 ## License
 
