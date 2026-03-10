@@ -10,6 +10,21 @@
 - **New: `banto status` enhancements**: shows recommended profile and stale hold summary
 - Backward compatible: all existing APIs unchanged
 
+### Security
+
+- **Process-safe `set_budget()`**: Budget limit updates wrapped in `fcntl` exclusive lock for entire read-modify-write cycle
+- **Copyright headers**: All source files include copyright and license headers
+- **Service prefix validation**: `KeychainStore` validates `service_prefix` against injection patterns
+- **Negative parameter validation**: `_lookup_price()` rejects negative token/image/second counts
+- **CLI bounds validation**: All CLI numeric inputs validated within safe ranges (tokens 0-100M, budget 0-1M)
+- **UTC datetime consistency**: All internal timestamps use `datetime.now(timezone.utc)`
+- **Error message hardening**: Model lists removed from budget error messages to prevent information leakage
+- **Hold settlement safety**: `settle_hold()` raises `ValueError` on unknown hold_id instead of silent pass
+- **Float precision defense**: `round(total_usd, 10)` prevents floating-point accumulation drift
+- **Entry count warning**: Usage log warns at >10,000 entries to prevent unbounded growth
+- **Keychain security documentation**: Security limitations of `security` CLI subprocess documented in code
+- **Accurate documentation**: "atomic" claims replaced with precise "exclusive-lock read-modify-write" descriptions
+
 ## 2.2.0 (2026-03-10)
 
 - **Separate pricing file**: Pricing table moved from `config.json` to dedicated `pricing.json` for independent updates. Backward compatible (inline `"pricing"` key still supported)
