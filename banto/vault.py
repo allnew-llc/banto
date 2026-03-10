@@ -10,11 +10,13 @@ Uses a hold/settle pattern for pessimistic budget reservation:
 - If record_usage() is never called, the hold stays — safe-side bias
 """
 
+import json
 import threading
 
 from .backend import SecretBackend
 from .guard import CostGuard, BudgetExceededError
 from .keychain import KeychainStore, KeyNotFoundError
+from .profiles import ProfileManager
 
 
 class SecureVault:
@@ -43,6 +45,11 @@ class SecureVault:
         vault.record_usage(model="gpt-4o",
                            input_tokens=800, output_tokens=400,
                            provider="openai", operation="chat")
+
+        # Role-based model resolution via profiles:
+        key = vault.get_key(role="chat",
+                            input_tokens=1000, output_tokens=500)
+        # Resolves "chat" -> model from active profile (e.g. "claude-sonnet-4-6")
     """
 
     def __init__(
@@ -73,6 +80,11 @@ class SecureVault:
         self._provider_map = self._build_provider_map()
         self._holds_lock = threading.Lock()
         self._pending_holds: dict[str, list[str]] = {}  # "model:provider" -> [hold_ids]
+
+        # Load config for profile manager (same file the guard uses)
+        with open(self._guard.config_path, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+        self._profile_manager = ProfileManager(config_data)
 
     def _build_provider_map(self) -> dict[str, str]:
         """Build model -> provider mapping from config."""
@@ -116,7 +128,8 @@ class SecureVault:
     def get_key(
         self,
         *,
-        model: str,
+        model: str | None = None,
+        role: str | None = None,
         provider: str | None = None,
         n: int = 1,
         seconds: int | None = None,
@@ -135,6 +148,9 @@ class SecureVault:
 
         Args:
             model: Model name (e.g. "gpt-4o", "dall-e-3").
+                   If both model and role are given, model takes priority.
+            role: Task role (e.g. "chat", "verify", "embed").
+                  Resolved to a model via the active profile.
             provider: Provider name. Auto-resolved from model if omitted.
             (remaining args): Cost estimation parameters.
 
@@ -144,8 +160,16 @@ class SecureVault:
         Raises:
             BudgetExceededError: Estimated cost exceeds remaining budget.
             KeyNotFoundError: No key stored for the provider.
-            ValueError: Provider cannot be determined from model name.
+            ValueError: Neither model nor role specified, or provider
+                        cannot be determined.
         """
+        if model is None and role is None:
+            raise ValueError("Either 'model' or 'role' must be specified")
+        if model is None:
+            assert role is not None  # guaranteed by the check above
+            model = self._profile_manager.resolve_model(role)
+
+        assert model is not None  # narrowing for type checker
         resolved = self._resolve_provider(provider, model)
 
         # Step 1: budget hold (raises BudgetExceededError if over)
@@ -248,3 +272,24 @@ class SecureVault:
     def set_budget(self, **kwargs) -> None:
         """Update budget limits. See CostGuard.set_budget() for args."""
         self._guard.set_budget(**kwargs)
+
+    # --- Profile management ---
+
+    def set_profile(self, name: str) -> None:
+        """Switch the active model profile.
+
+        Args:
+            name: Profile name (e.g. "quality", "balanced", "budget").
+
+        Raises:
+            ValueError: If name is not a known profile.
+        """
+        self._profile_manager.active_profile = name
+
+    def get_profiles(self) -> dict[str, dict]:
+        """Return all profiles with active indicator.
+
+        Returns:
+            Dict mapping profile name to {"models": {...}, "active": bool}.
+        """
+        return self._profile_manager.list_profiles()

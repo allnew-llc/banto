@@ -114,6 +114,7 @@ class CostGuard:
             config = json.load(f)
 
         self.monthly_limit_usd: float = config["monthly_limit_usd"]
+        self.hold_timeout_hours: float = config.get("hold_timeout_hours", 24)
         self.provider_limits: dict[str, float] = config.get("provider_limits", {})
         self.model_limits: dict[str, float] = config.get("model_limits", {})
         self.providers: dict = config.get("providers", {})
@@ -169,6 +170,26 @@ class CostGuard:
         except (json.JSONDecodeError, KeyError):
             return self._create_empty_usage()
 
+    def _void_stale_holds(self, data: dict) -> list[dict]:
+        """Void holds older than hold_timeout_hours. Returns list of voided entries.
+
+        Sets cost_usd to 0 on voided entries so the total_usd recalculation
+        in _update_usage() automatically releases the held budget.
+        """
+        now = datetime.now()
+        voided = []
+        for entry in data.get("entries", []):
+            if entry.get("status") != "hold":
+                continue
+            held_at = datetime.fromisoformat(entry["timestamp"])
+            if (now - held_at).total_seconds() > self.hold_timeout_hours * 3600:
+                entry["hold_cost_usd"] = entry.get("cost_usd", 0)
+                entry["cost_usd"] = 0
+                entry["status"] = "voided_timeout"
+                entry["voided_at"] = now.isoformat(timespec="seconds")
+                voided.append(entry)
+        return voided
+
     def _update_usage(self, fn):
         """Atomically read-modify-write the usage file.
 
@@ -203,6 +224,8 @@ class CostGuard:
                         data = self._create_empty_usage()
                 else:
                     data = self._create_empty_usage()
+
+                self._void_stale_holds(data)
 
                 result = fn(data)
 
@@ -681,6 +704,15 @@ class CostGuard:
                         "remaining_usd": limit,
                     }
 
+            # Voided timeout summary
+            voided_entries = [
+                e for e in entries if e.get("status") == "voided_timeout"
+            ]
+            voided_count = len(voided_entries)
+            voided_usd = sum(
+                e.get("hold_cost_usd", 0) for e in voided_entries
+            )
+
             return {
                 "remaining_usd": self.monthly_limit_usd - usage["total_usd"],
                 "used_usd": usage["total_usd"],
@@ -691,7 +723,29 @@ class CostGuard:
                 "entry_count": usage["entry_count"],
                 "by_provider": provider_status,
                 "by_model": model_status,
+                "voided_timeout_count": voided_count,
+                "voided_timeout_usd": voided_usd,
             }
+
+    def recommend_profile(self) -> str:
+        """Recommend a model quality profile based on remaining budget.
+
+        Returns:
+            "quality" if >50% remaining
+            "balanced" if >20% remaining
+            "budget" if <=20% remaining
+        """
+        remaining = self.get_remaining_budget()
+        limit = remaining.get("monthly_limit_usd", 0)
+        if limit <= 0:
+            return "quality"  # No limit set = unlimited
+        used = remaining.get("used_usd", 0)
+        remaining_pct = (limit - used) / limit
+        if remaining_pct > 0.50:
+            return "quality"
+        if remaining_pct > 0.20:
+            return "balanced"
+        return "budget"
 
     def set_budget(
         self,

@@ -16,7 +16,15 @@ from pathlib import Path
 
 from .guard import CostGuard, CONFIG_DIR
 from .keychain import KeychainStore, _validate_provider
+from .profiles import ProfileManager
 from .vault import SecureVault
+
+
+_PROFILE_DESCRIPTIONS = {
+    "quality": "Use premium models for best results",
+    "balanced": "Mix of quality and cost efficiency",
+    "budget": "Prioritize cost savings",
+}
 
 
 def cmd_status(args: list[str]) -> None:
@@ -27,6 +35,23 @@ def cmd_status(args: list[str]) -> None:
     print(f"Remaining: ${s['remaining_usd']:.2f}")
     print(f"Limit:     ${s['monthly_limit_usd']:.2f}")
     print(f"Entries:   {s['entry_count']}")
+
+    # Voided timeout holds
+    voided_count = s.get("voided_timeout_count", 0)
+    if voided_count > 0:
+        voided_usd = s.get("voided_timeout_usd", 0)
+        print(f"Stale holds voided: {voided_count} (${voided_usd:.2f} released)")
+
+    # Recommended profile
+    profile = guard.recommend_profile()
+    limit = s["monthly_limit_usd"]
+    if limit > 0:
+        remaining_pct = int((limit - s["used_usd"]) / limit * 100)
+        print(f"\nRecommended profile: {profile} "
+              f"({remaining_pct}% budget remaining)")
+    else:
+        print(f"\nRecommended profile: {profile} (no limit set)")
+    print(f"  -> {_PROFILE_DESCRIPTIONS[profile]}")
 
     # Provider breakdown
     by_provider = s.get("by_provider", {})
@@ -174,6 +199,35 @@ def cmd_check(args: list[str]) -> None:
         print("Result:    BLOCKED (over budget)")
 
 
+def cmd_profile(args: list[str]) -> None:
+    """Show or set the active model profile."""
+    vault = SecureVault(caller="cli")
+    profiles = vault.get_profiles()
+
+    if not args:
+        # Show all profiles
+        print("Model profiles:\n")
+        for name, info in profiles.items():
+            marker = " *" if info["active"] else "  "
+            desc = _PROFILE_DESCRIPTIONS.get(name, "")
+            print(f" {marker} {name:12s}  {desc}")
+            for role, model in info["models"].items():
+                print(f"      {role:8s} -> {model}")
+            print()
+        return
+
+    profile_name = args[0]
+    try:
+        vault.set_profile(profile_name)
+        print(f"Active profile set to '{profile_name}'.")
+        desc = _PROFILE_DESCRIPTIONS.get(profile_name, "")
+        if desc:
+            print(f"  -> {desc}")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_budget(args: list[str]) -> None:
     guard = CostGuard(caller="cli")
 
@@ -296,6 +350,7 @@ def cmd_init(args: list[str]) -> None:
 COMMANDS = {
     "status": cmd_status,
     "budget": cmd_budget,
+    "profile": cmd_profile,
     "store": cmd_store,
     "delete": cmd_delete,
     "list": cmd_list,
@@ -311,6 +366,7 @@ def main() -> None:
         print("Commands:")
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
+        print("  profile [name]      Show or set the active model profile")
         print("  store <provider>    Store an API key in Keychain")
         print("  delete <provider>   Delete an API key from Keychain")
         print("  list                List stored keys and budget")
@@ -323,6 +379,10 @@ def main() -> None:
         print("  banto budget --provider openai 30     Set OpenAI limit to $30")
         print("  banto budget --model dall-e-3 10      Set DALL-E 3 limit to $10")
         print("  banto budget --provider openai --remove  Remove provider limit")
+        print()
+        print("Profile examples:")
+        print("  banto profile                         Show all profiles")
+        print("  banto profile balanced                Set active profile")
         sys.exit(0)
 
     cmd = sys.argv[1]
