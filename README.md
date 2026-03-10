@@ -2,13 +2,13 @@
 
 # banto
 
-Structurally prevents excessive API charges caused by unexpectedly running LLM agents. A budget-gated API key vault for macOS.
+Structurally prevents excessive API charges caused by unexpectedly running LLM agents. API keys are stored in macOS Keychain -- not in `.env` files or environment variables -- and released only when the budget allows.
 
 > Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
 ## Problem
 
-LLM agents can exceed API budgets unchecked. Traditional budget checks are advisory -- the agent can catch the exception and call the API regardless, because the API key is already available in the environment. When agents run unexpectedly, this can result in significant charges.
+Most projects store API keys in `.env` files or environment variables, where any process can read them. LLM agents can catch budget-check exceptions and call the API regardless. When agents run unexpectedly, this can result in significant charges.
 
 ## Solution
 
