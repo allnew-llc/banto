@@ -114,10 +114,25 @@ class CostGuard:
             config = json.load(f)
 
         self.monthly_limit_usd: float = config["monthly_limit_usd"]
-        self.hold_timeout_hours: float = config.get("hold_timeout_hours", 24)
-        self.provider_limits: dict[str, float] = config.get("provider_limits", {})
-        self.model_limits: dict[str, float] = config.get("model_limits", {})
-        self.providers: dict = config.get("providers", {})
+        raw_timeout = config.get("hold_timeout_hours", 24)
+        self.hold_timeout_hours: float = max(1, min(8760, raw_timeout))
+
+        # Load and validate provider/model limits (reject metadata keys)
+        raw_provider_limits = config.get("provider_limits", {})
+        self.provider_limits: dict[str, float] = {
+            k: v for k, v in raw_provider_limits.items()
+            if not k.startswith("_")
+        }
+        raw_model_limits = config.get("model_limits", {})
+        self.model_limits: dict[str, float] = {
+            k: v for k, v in raw_model_limits.items()
+            if not k.startswith("_")
+        }
+        raw_providers = config.get("providers", {})
+        self.providers: dict = {
+            k: v for k, v in raw_providers.items()
+            if not k.startswith("_")
+        }
 
         # Load pricing from separate file (or fall back to inline "pricing" key)
         if "pricing" in config:
@@ -158,9 +173,9 @@ class CostGuard:
                 _lock_file(f, exclusive=False)
                 try:
                     data = json.load(f)
-                    data["total_usd"] = sum(
+                    data["total_usd"] = max(0.0, sum(
                         e.get("cost_usd", 0) for e in data.get("entries", [])
-                    )
+                    ))
                     data["entry_count"] = len(data.get("entries", []))
                     return data
                 finally:
@@ -210,10 +225,10 @@ class CostGuard:
                 if content.strip():
                     try:
                         data = json.loads(content)
-                        data["total_usd"] = sum(
+                        data["total_usd"] = max(0.0, sum(
                             e.get("cost_usd", 0)
                             for e in data.get("entries", [])
-                        )
+                        ))
                         data["entry_count"] = len(data.get("entries", []))
                     except (json.JSONDecodeError, KeyError):
                         backup = usage_path.with_suffix(".json.corrupted")
@@ -229,10 +244,10 @@ class CostGuard:
 
                 result = fn(data)
 
-                data["total_usd"] = sum(
+                data["total_usd"] = max(0.0, sum(
                     e.get("cost_usd", 0)
                     for e in data.get("entries", [])
-                )
+                ))
                 data["entry_count"] = len(data.get("entries", []))
                 f.seek(0)
                 f.truncate()
@@ -763,6 +778,10 @@ class CostGuard:
             raise ValueError("Provider budget limit cannot be negative")
         if model_limit is not None and model_limit < 0:
             raise ValueError("Model budget limit cannot be negative")
+        if provider is not None and provider.startswith("_"):
+            raise ValueError(f"Invalid provider name: {provider}")
+        if model is not None and model.startswith("_"):
+            raise ValueError(f"Invalid model name: {model}")
 
         with open(self.config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
