@@ -71,13 +71,38 @@ All budgets are denominated in **US dollars (USD)** and enforced on a **calendar
 
 ### 3. Store API keys
 
+Register your API keys in macOS Keychain. Run `banto store <provider>` for each provider you use. You will be prompted to enter the key — input is masked and not displayed on screen.
+
+```
+$ banto store openai
+Enter API key for 'openai':    ← paste your key here (input is hidden)
+Stored 'openai' in Keychain.
+```
+
+If a key already exists for the provider, you will be asked whether to overwrite:
+
+```
+$ banto store openai
+Key for 'openai' already exists. Overwrite? (y/N): y
+Enter API key for 'openai':
+Stored 'openai' in Keychain.
+```
+
+You can find your API keys at each provider's dashboard:
+
+- **OpenAI**: https://platform.openai.com/api-keys
+- **Google**: https://aistudio.google.com/apikey
+- **Anthropic**: https://console.anthropic.com/settings/keys
+
+Repeat for each provider:
+
 ```bash
 banto store openai
 banto store google
 banto store anthropic
 ```
 
-### 3. Use in your code
+### 4. Use in your code
 
 ```python
 from banto import SecureVault, BudgetExceededError, KeyNotFoundError

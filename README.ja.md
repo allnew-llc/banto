@@ -71,13 +71,38 @@ banto budget 50    # グローバル月次上限を $50 USD に設定
 
 ### 3. APIキーの登録
 
+使用するプロバイダごとに `banto store <provider>` を実行し、APIキーをmacOS Keychainに登録します。キーの入力はマスクされ、画面に表示されません。
+
+```
+$ banto store openai
+Enter API key for 'openai':    ← ここにキーを貼り付けます（入力は非表示）
+Stored 'openai' in Keychain.
+```
+
+すでにキーが登録されている場合は、上書きするかどうか確認されます。
+
+```
+$ banto store openai
+Key for 'openai' already exists. Overwrite? (y/N): y
+Enter API key for 'openai':
+Stored 'openai' in Keychain.
+```
+
+APIキーは各プロバイダのダッシュボードから取得できます。
+
+- **OpenAI**: https://platform.openai.com/api-keys
+- **Google**: https://aistudio.google.com/apikey
+- **Anthropic**: https://console.anthropic.com/settings/keys
+
+使用するプロバイダごとに繰り返します。
+
 ```bash
 banto store openai
 banto store google
 banto store anthropic
 ```
 
-### 3. コードへの組み込み
+### 4. コードへの組み込み
 
 ```python
 from banto import SecureVault, BudgetExceededError, KeyNotFoundError
