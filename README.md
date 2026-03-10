@@ -61,7 +61,7 @@ banto init    # copies default config to ~/.config/banto/
 
 ### 2. Set your monthly budget
 
-The default budget is **$0 (USD)** — all API calls are blocked until you set a limit. This is intentional: banto requires an explicit budget decision before any key is released.
+The default budget is **$0 (USD)**. Please set your own budget. While the budget remains at $0, all API key retrieval is blocked.
 
 ```bash
 banto budget 50    # set global monthly limit to $50 USD
@@ -165,7 +165,7 @@ Default config is at `~/.config/banto/config.json`. Run `banto init` to create i
 
 ### Budget limit
 
-All budgets are in **USD**, enforced per **calendar month**. The default is `0` — you must set a limit before any key can be retrieved.
+All budgets are in **USD**, enforced per **calendar month**. The default is `0`. Please set your own budget limit.
 
 ```json
 {
