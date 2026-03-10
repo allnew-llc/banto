@@ -1,0 +1,11 @@
+data/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.env.*
+*.pem
+*.p12

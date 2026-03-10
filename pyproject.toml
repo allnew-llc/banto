@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banto"
+version = "2.0.0"
+description = "Budget-gated API key vault for LLM applications on macOS"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "AllNew LLC" }]
+keywords = ["llm", "api", "budget", "keychain", "macos", "security"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/allnew-llc/banto"
+Issues = "https://github.com/allnew-llc/banto/issues"
+
+[project.scripts]
+banto = "banto.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["banto*"]
+
+[tool.setuptools.package-data]
+banto = ["config.json"]
