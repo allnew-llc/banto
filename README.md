@@ -180,6 +180,12 @@ Maps models to providers so `get_key()` knows which Keychain entry to look up:
 
 ### Pricing
 
+banto ships with a default pricing table covering major models from OpenAI, Anthropic, and Google. **Prices are static** — banto does not fetch them from provider APIs at runtime.
+
+> **Why static?** As of March 2026, none of the major providers (OpenAI, Anthropic, xAI) offer a public API endpoint that returns per-model pricing rates. Google Cloud provides a [Billing Catalog API](https://cloud.google.com/billing/docs/how-to/get-pricing-information-api) for Vertex AI SKUs, but the SKU-to-model mapping is non-trivial. A static table with manual updates is the only practical approach that works across all providers.
+
+When providers change their pricing, update `~/.config/banto/config.json` accordingly. To add a new model, add an entry to both `providers` (for key resolution) and `pricing` (for cost calculation).
+
 Three pricing types:
 
 ```json

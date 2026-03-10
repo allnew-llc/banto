@@ -180,6 +180,12 @@ banto check sora-2 --seconds 10
 
 ### 料金設定
 
+bantoにはOpenAI・Anthropic・Googleの主要モデルを網羅したデフォルト料金テーブルが同梱されています。**料金は静的に定義されており**、プロバイダのAPIから実行時に自動取得する機能はありません。
+
+> **静的テーブルである理由**: 2026年3月時点で、主要プロバイダ（OpenAI、Anthropic、xAI）はモデル単価を返す公開APIを提供していません。Google Cloudは[Billing Catalog API](https://cloud.google.com/billing/docs/how-to/get-pricing-information-api)でVertex AIのSKU単価を取得できますが、SKU名とモデル名の対応付けが容易ではありません。全プロバイダに共通して機能する唯一の実用的な方法は、静的テーブルの手動更新です。
+
+プロバイダが料金を改定した場合は、`~/.config/banto/config.json` を更新してください。新しいモデルを追加する場合は、`providers`（キー解決用）と `pricing`（コスト算定用）の両方にエントリを追加します。
+
 3種類の課金体系に対応しています:
 
 ```json
