@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 banto - Budget-gated API key vault for LLM applications.
 

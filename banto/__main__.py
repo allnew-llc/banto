@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 CLI entry point: python -m banto <command>
 
@@ -18,6 +20,41 @@ from .guard import CostGuard, CONFIG_DIR
 from .keychain import KeychainStore, _validate_provider
 from .profiles import ProfileManager
 from .vault import SecureVault
+
+
+def _validate_cli_bounds(
+    *,
+    tokens: int | None = None,
+    seconds: int | None = None,
+    n: int | None = None,
+    budget: float | None = None,
+    label: str = "",
+) -> None:
+    """Validate CLI numeric arguments are within reasonable bounds."""
+    if tokens is not None and not (0 <= tokens <= 100_000_000):
+        print(
+            f"Error: {label}tokens must be between 0 and 100,000,000, got {tokens}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if seconds is not None and not (0 <= seconds <= 86400):
+        print(
+            f"Error: seconds must be between 0 and 86,400, got {seconds}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if n is not None and not (1 <= n <= 10_000):
+        print(
+            f"Error: n must be between 1 and 10,000, got {n}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if budget is not None and not (0 <= budget <= 1_000_000):
+        print(
+            f"Error: budget amount must be between 0 and 1,000,000, got {budget}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 _PROFILE_DESCRIPTIONS = {
@@ -167,14 +204,22 @@ def cmd_check(args: list[str]) -> None:
     i = 1
     while i < len(args):
         if args[i] == "--tokens" and i + 2 < len(args):
-            kwargs["input_tokens"] = int(args[i + 1])
-            kwargs["output_tokens"] = int(args[i + 2])
+            in_tok = int(args[i + 1])
+            out_tok = int(args[i + 2])
+            _validate_cli_bounds(tokens=in_tok, label="input_")
+            _validate_cli_bounds(tokens=out_tok, label="output_")
+            kwargs["input_tokens"] = in_tok
+            kwargs["output_tokens"] = out_tok
             i += 3
         elif args[i] == "--n" and i + 1 < len(args):
-            kwargs["n"] = int(args[i + 1])
+            n_val = int(args[i + 1])
+            _validate_cli_bounds(n=n_val)
+            kwargs["n"] = n_val
             i += 2
         elif args[i] == "--seconds" and i + 1 < len(args):
-            kwargs["seconds"] = int(args[i + 1])
+            sec_val = int(args[i + 1])
+            _validate_cli_bounds(seconds=sec_val)
+            kwargs["seconds"] = sec_val
             i += 2
         elif args[i] == "--quality" and i + 1 < len(args):
             kwargs["quality"] = args[i + 1]
@@ -274,6 +319,7 @@ def cmd_budget(args: list[str]) -> None:
         else:
             try:
                 amount = float(args[i])
+                _validate_cli_bounds(budget=amount)
                 if provider is not None:
                     provider_limit = amount
                 elif model is not None:

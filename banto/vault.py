@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 vault.py - SecureVault: budget-gated API key access.
 
@@ -24,7 +26,7 @@ class SecureVault:
     Budget-gated API key vault.
 
     Combines secret storage with monthly budget enforcement.
-    ``get_key()`` reserves budget and retrieves the key atomically.
+    ``get_key()`` reserves budget and retrieves the key in sequence.
     ``record_usage()`` settles the reservation with actual cost.
 
     The secret backend is pluggable. By default, macOS Keychain is used.

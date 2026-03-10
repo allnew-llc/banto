@@ -1,7 +1,7 @@
 """Tests for stale hold timeout (automatic voiding of expired holds)."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -52,7 +52,7 @@ def _inject_hold_entry(
     hours_ago: float,
 ):
     """Write a usage file with a hold entry created hours_ago hours in the past."""
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     held_at = now - timedelta(hours=hours_ago)
     month_str = f"{now.year}-{now.month:02d}"
     usage_path = data_dir / f"usage_{now.year}_{now.month:02d}.json"
@@ -231,10 +231,10 @@ class TestHoldTimeoutVoiding:
         config_path, data_dir = tmp_env
 
         # Pick a precise held_at and freeze now to exactly 24h later.
-        held_at = datetime(2026, 3, 1, 12, 0, 0)
+        held_at = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
         frozen_now = held_at + timedelta(hours=24)  # exactly 24h = 86400s
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         usage_path = data_dir / f"usage_{now.year}_{now.month:02d}.json"
         data = {
             "month": f"{now.year}-{now.month:02d}",
@@ -283,8 +283,8 @@ class TestHoldTimeoutVoiding:
         """A hold just over the timeout should be voided."""
         config_path, data_dir = tmp_env
 
-        held_at = datetime.now() - timedelta(hours=24, seconds=1)
-        now_time = datetime.now()
+        held_at = datetime.now(timezone.utc) - timedelta(hours=24, seconds=1)
+        now_time = datetime.now(timezone.utc)
 
         usage_path = data_dir / f"usage_{now_time.year}_{now_time.month:02d}.json"
         data = {
@@ -325,7 +325,7 @@ class TestHoldTimeoutVoiding:
     def test_settled_and_voided_entries_not_affected(self, tmp_env):
         """Entries with status 'settled' or 'voided' should not be touched."""
         config_path, data_dir = tmp_env
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         old_ts = (now - timedelta(hours=48)).isoformat(timespec="seconds")
 
         usage_path = data_dir / f"usage_{now.year}_{now.month:02d}.json"

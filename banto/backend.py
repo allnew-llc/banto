@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 backend.py - Pluggable secret storage protocol.
 

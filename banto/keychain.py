@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 keychain.py - macOS Keychain integration for API key storage.
 
@@ -35,6 +37,24 @@ class KeyNotFoundError(Exception):
         )
 
 
+_PREFIX_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _validate_prefix(prefix: str) -> str:
+    """Validate service_prefix for safe use in Keychain service names.
+
+    Raises:
+        ValueError: If prefix contains characters outside [A-Za-z0-9._-].
+    """
+    prefix = prefix.strip()
+    if not prefix or not _PREFIX_RE.match(prefix):
+        raise ValueError(
+            f"Invalid service_prefix: {prefix!r}. "
+            "Use only letters, digits, dots, hyphens, and underscores."
+        )
+    return prefix
+
+
 class KeychainStore:
     """macOS Keychain wrapper for API key storage."""
 
@@ -46,7 +66,7 @@ class KeychainStore:
             service_prefix: Prefix for Keychain service names.
                             Default: "banto" (keys stored as "banto-openai" etc.)
         """
-        self.prefix = service_prefix or self.DEFAULT_PREFIX
+        self.prefix = _validate_prefix(service_prefix) if service_prefix else self.DEFAULT_PREFIX
         try:
             self.account = os.getlogin()
         except OSError:
@@ -98,6 +118,9 @@ class KeychainStore:
                 ],
                 capture_output=True,
             )
+            # SECURITY NOTE: API key is briefly visible in process table via `ps aux`.
+            # macOS `security` CLI does not reliably support stdin for -w flag.
+            # See README.md Security > Threat Model for mitigation guidance.
             result = subprocess.run(
                 [
                     "security", "add-generic-password",
