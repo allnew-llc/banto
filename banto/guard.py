@@ -1,3 +1,5 @@
+# Copyright 2025-2026 AllNew LLC
+# Licensed under LicenseRef-Dual (see LICENSE)
 """
 guard.py - API cost tracking and monthly budget enforcement.
 
@@ -10,7 +12,7 @@ import sys
 import threading
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 CONFIG_DIR = Path.home() / ".config" / "banto"
 
@@ -114,9 +116,25 @@ class CostGuard:
             config = json.load(f)
 
         self.monthly_limit_usd: float = config["monthly_limit_usd"]
-        self.provider_limits: dict[str, float] = config.get("provider_limits", {})
-        self.model_limits: dict[str, float] = config.get("model_limits", {})
-        self.providers: dict = config.get("providers", {})
+        raw_timeout = config.get("hold_timeout_hours", 24)
+        self.hold_timeout_hours: float = max(1, min(8760, raw_timeout))
+
+        # Load and validate provider/model limits (reject metadata keys)
+        raw_provider_limits = config.get("provider_limits", {})
+        self.provider_limits: dict[str, float] = {
+            k: v for k, v in raw_provider_limits.items()
+            if not k.startswith("_")
+        }
+        raw_model_limits = config.get("model_limits", {})
+        self.model_limits: dict[str, float] = {
+            k: v for k, v in raw_model_limits.items()
+            if not k.startswith("_")
+        }
+        raw_providers = config.get("providers", {})
+        self.providers: dict = {
+            k: v for k, v in raw_providers.items()
+            if not k.startswith("_")
+        }
 
         # Load pricing from separate file (or fall back to inline "pricing" key)
         if "pricing" in config:
@@ -137,11 +155,11 @@ class CostGuard:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_usage_file_path(self) -> Path:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         return self.data_dir / f"usage_{now.year}_{now.month:02d}.json"
 
     def _create_empty_usage(self) -> dict:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         return {
             "month": f"{now.year}-{now.month:02d}",
             "total_usd": 0.0,
@@ -157,9 +175,9 @@ class CostGuard:
                 _lock_file(f, exclusive=False)
                 try:
                     data = json.load(f)
-                    data["total_usd"] = sum(
+                    data["total_usd"] = round(max(0.0, sum(
                         e.get("cost_usd", 0) for e in data.get("entries", [])
-                    )
+                    )), 10)
                     data["entry_count"] = len(data.get("entries", []))
                     return data
                 finally:
@@ -169,8 +187,31 @@ class CostGuard:
         except (json.JSONDecodeError, KeyError):
             return self._create_empty_usage()
 
+    def _void_stale_holds(self, data: dict) -> list[dict]:
+        """Void holds older than hold_timeout_hours. Returns list of voided entries.
+
+        Sets cost_usd to 0 on voided entries so the total_usd recalculation
+        in _update_usage() automatically releases the held budget.
+        """
+        now = datetime.now(timezone.utc)
+        voided = []
+        for entry in data.get("entries", []):
+            if entry.get("status") != "hold":
+                continue
+            held_at = datetime.fromisoformat(entry["timestamp"])
+            # Normalize naive timestamps (pre-UTC migration) to UTC
+            if held_at.tzinfo is None:
+                held_at = held_at.replace(tzinfo=timezone.utc)
+            if (now - held_at).total_seconds() > self.hold_timeout_hours * 3600:
+                entry["hold_cost_usd"] = entry.get("cost_usd", 0)
+                entry["cost_usd"] = 0
+                entry["status"] = "voided_timeout"
+                entry["voided_at"] = now.isoformat(timespec="seconds")
+                voided.append(entry)
+        return voided
+
     def _update_usage(self, fn):
-        """Atomically read-modify-write the usage file.
+        """Read-modify-write the usage file under exclusive file lock.
 
         Holds an exclusive file lock for the entire read-modify-write
         cycle, ensuring process-safe concurrent access.
@@ -189,10 +230,10 @@ class CostGuard:
                 if content.strip():
                     try:
                         data = json.loads(content)
-                        data["total_usd"] = sum(
+                        data["total_usd"] = round(max(0.0, sum(
                             e.get("cost_usd", 0)
                             for e in data.get("entries", [])
-                        )
+                        )), 10)
                         data["entry_count"] = len(data.get("entries", []))
                     except (json.JSONDecodeError, KeyError):
                         backup = usage_path.with_suffix(".json.corrupted")
@@ -204,12 +245,23 @@ class CostGuard:
                 else:
                     data = self._create_empty_usage()
 
+                self._void_stale_holds(data)
+
+                entries = data.get("entries", [])
+                if len(entries) > 10000:
+                    import warnings
+                    warnings.warn(
+                        f"Usage file has {len(entries)} entries. "
+                        "Consider monthly reset.",
+                        stacklevel=2,
+                    )
+
                 result = fn(data)
 
-                data["total_usd"] = sum(
+                data["total_usd"] = round(max(0.0, sum(
                     e.get("cost_usd", 0)
                     for e in data.get("entries", [])
-                )
+                )), 10)
                 data["entry_count"] = len(data.get("entries", []))
                 f.seek(0)
                 f.truncate()
@@ -233,10 +285,17 @@ class CostGuard:
             raise ValueError(f"Invalid model name: {model}")
 
         if model not in self.pricing:
-            available = [k for k in self.pricing if not k.startswith("_")]
-            raise ValueError(
-                f"Unknown model: {model}. Available: {available}"
-            )
+            raise ValueError(f"Unknown model: {model}")
+
+        # M-3: Validate numeric parameters
+        if n < 1:
+            raise ValueError(f"n must be >= 1, got {n}")
+        if input_tokens is not None and input_tokens < 0:
+            raise ValueError(f"input_tokens must be >= 0, got {input_tokens}")
+        if output_tokens is not None and output_tokens < 0:
+            raise ValueError(f"output_tokens must be >= 0, got {output_tokens}")
+        if seconds is not None and seconds < 0:
+            raise ValueError(f"seconds must be >= 0, got {seconds}")
 
         entry = self.pricing[model]
 
@@ -313,6 +372,9 @@ class CostGuard:
     ) -> dict:
         """
         Check if budget allows this call. Does NOT record usage.
+
+        Note: This is an advisory check only. For authoritative enforcement,
+        use hold_budget()/settle_hold().
 
         Checks three layers (all must pass):
         1. Global monthly limit
@@ -457,7 +519,7 @@ class CostGuard:
                     params["output_tokens"] = output_tokens
 
                 usage["entries"].append({
-                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "model": model,
                     "provider": provider,
                     "operation": "hold",
@@ -504,11 +566,9 @@ class CostGuard:
                         break
 
                 if hold_idx is None:
-                    return self._append_record(
-                        usage, model=model, n=n, seconds=seconds,
-                        quality=quality, size=size,
-                        input_tokens=input_tokens, output_tokens=output_tokens,
-                        provider=provider, operation=operation,
+                    raise ValueError(
+                        f"Hold ID not found: {hold_id}. "
+                        "Cannot settle without a prior hold."
                     )
 
                 hold_entry = entries[hold_idx]
@@ -528,7 +588,7 @@ class CostGuard:
                     params["output_tokens"] = output_tokens
 
                 entries[hold_idx] = {
-                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "model": actual_model,
                     "provider": actual_provider,
                     "operation": operation,
@@ -540,7 +600,7 @@ class CostGuard:
                     "caller": self.caller,
                 }
 
-                total_used = sum(e.get("cost_usd", 0) for e in entries)
+                total_used = round(sum(e.get("cost_usd", 0) for e in entries), 10)
                 return {
                     "cost_usd": actual_cost,
                     "hold_cost_usd": hold_entry["cost_usd"],
@@ -579,7 +639,7 @@ class CostGuard:
             params["output_tokens"] = output_tokens
 
         entry = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "model": model,
             "provider": provider,
             "operation": operation,
@@ -591,7 +651,7 @@ class CostGuard:
 
         usage["entries"].append(entry)
 
-        total_used = usage["total_usd"] + cost
+        total_used = round(usage["total_usd"] + cost, 10)
         return {
             "cost_usd": cost,
             "total_used_usd": total_used,
@@ -681,6 +741,15 @@ class CostGuard:
                         "remaining_usd": limit,
                     }
 
+            # Voided timeout summary
+            voided_entries = [
+                e for e in entries if e.get("status") == "voided_timeout"
+            ]
+            voided_count = len(voided_entries)
+            voided_usd = sum(
+                e.get("hold_cost_usd", 0) for e in voided_entries
+            )
+
             return {
                 "remaining_usd": self.monthly_limit_usd - usage["total_usd"],
                 "used_usd": usage["total_usd"],
@@ -691,7 +760,29 @@ class CostGuard:
                 "entry_count": usage["entry_count"],
                 "by_provider": provider_status,
                 "by_model": model_status,
+                "voided_timeout_count": voided_count,
+                "voided_timeout_usd": voided_usd,
             }
+
+    def recommend_profile(self) -> str:
+        """Recommend a model quality profile based on remaining budget.
+
+        Returns:
+            "quality" if >50% remaining
+            "balanced" if >20% remaining
+            "budget" if <=20% remaining
+        """
+        remaining = self.get_remaining_budget()
+        limit = remaining.get("monthly_limit_usd", 0)
+        if limit <= 0:
+            return "quality"  # No limit set = unlimited
+        used = remaining.get("used_usd", 0)
+        remaining_pct = (limit - used) / limit
+        if remaining_pct > 0.50:
+            return "quality"
+        if remaining_pct > 0.20:
+            return "balanced"
+        return "budget"
 
     def set_budget(
         self,
@@ -709,33 +800,46 @@ class CostGuard:
             raise ValueError("Provider budget limit cannot be negative")
         if model_limit is not None and model_limit < 0:
             raise ValueError("Model budget limit cannot be negative")
+        if provider is not None and provider.startswith("_"):
+            raise ValueError(f"Invalid provider name: {provider}")
+        if model is not None and model.startswith("_"):
+            raise ValueError(f"Invalid model name: {model}")
 
-        with open(self.config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
+        config_path = self.config_path
+        fd = os.open(str(config_path), os.O_RDWR | os.O_CREAT, 0o640)
+        try:
+            if sys.platform == "win32":
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            raw = os.read(fd, 10_000_000)
+            config = json.loads(raw.decode("utf-8")) if raw else {}
 
-        if global_limit is not None:
-            config["monthly_limit_usd"] = global_limit
-            self.monthly_limit_usd = global_limit
+            if global_limit is not None:
+                config["monthly_limit_usd"] = global_limit
+                self.monthly_limit_usd = global_limit
 
-        if provider is not None:
-            limits = config.setdefault("provider_limits", {})
-            if provider_limit is not None and provider_limit > 0:
-                limits[provider] = provider_limit
-                self.provider_limits[provider] = provider_limit
-            elif provider in limits:
-                del limits[provider]
-                self.provider_limits.pop(provider, None)
+            if provider is not None:
+                limits = config.setdefault("provider_limits", {})
+                if provider_limit is not None and provider_limit > 0:
+                    limits[provider] = provider_limit
+                    self.provider_limits[provider] = provider_limit
+                elif provider in limits:
+                    del limits[provider]
+                    self.provider_limits.pop(provider, None)
 
-        if model is not None:
-            limits = config.setdefault("model_limits", {})
-            if model_limit is not None and model_limit > 0:
-                limits[model] = model_limit
-                self.model_limits[model] = model_limit
-            elif model in limits:
-                del limits[model]
-                self.model_limits.pop(model, None)
+            if model is not None:
+                limits = config.setdefault("model_limits", {})
+                if model_limit is not None and model_limit > 0:
+                    limits[model] = model_limit
+                    self.model_limits[model] = model_limit
+                elif model in limits:
+                    del limits[model]
+                    self.model_limits.pop(model, None)
 
-        fd = os.open(str(self.config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
-        with open(fd, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.ftruncate(fd, 0)
+            os.write(fd, json.dumps(config, indent=2, ensure_ascii=False).encode("utf-8"))
+            os.write(fd, b"\n")
+        finally:
+            os.close(fd)
