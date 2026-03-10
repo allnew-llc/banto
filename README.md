@@ -186,7 +186,7 @@ banto check sora-2 --seconds 10
 
 ## Configuration
 
-Default config is at `~/.config/banto/config.json`. Run `banto init` to create it.
+Default config is at `~/.config/banto/`. Run `banto init` to create `config.json` (budget settings) and `pricing.json` (pricing table).
 
 ### Budget limit
 
@@ -215,36 +215,34 @@ Maps models to providers so `get_key()` knows which Keychain entry to look up:
 }
 ```
 
-### Pricing
+### Pricing (`pricing.json`)
 
-banto ships with a default pricing table covering major models from OpenAI, Anthropic, and Google. **Prices are static** — banto does not fetch them from provider APIs at runtime.
+Pricing is stored in a **separate file** (`~/.config/banto/pricing.json`), independent of budget settings. banto ships with a sample pricing table covering major models from OpenAI, Anthropic, and Google as of March 2026.
 
-> **Why static?** As of March 2026, none of the major providers (OpenAI, Anthropic, xAI) offer a public API endpoint that returns per-model pricing rates. Google Cloud provides a [Billing Catalog API](https://cloud.google.com/billing/docs/how-to/get-pricing-information-api) for Vertex AI SKUs, but the SKU-to-model mapping is non-trivial. A static table with manual updates is the only practical approach that works across all providers.
+> **Prices are static and not guaranteed.** banto does not fetch pricing from provider APIs at runtime. None of the major providers (OpenAI, Anthropic, xAI) offer a public API endpoint that returns per-model pricing rates. Verify rates at each provider's official pricing page and update `pricing.json` accordingly. AllNew LLC assumes no liability for inaccuracies in the pricing table.
 
-When providers change their pricing, update `~/.config/banto/config.json` accordingly. To add a new model, add an entry to both `providers` (for key resolution) and `pricing` (for cost calculation).
+When providers change their pricing, edit `~/.config/banto/pricing.json`. To add a new model, add an entry to both `providers` in `config.json` (for key resolution) and `pricing.json` (for cost calculation).
 
-Three pricing types:
+Three pricing types are supported:
 
 ```json
 {
-  "pricing": {
-    "gpt-4o": {
-      "type": "per_token",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01
+  "gpt-4o": {
+    "type": "per_token",
+    "input_per_1k": 0.0025,
+    "output_per_1k": 0.01
+  },
+  "dall-e-3": {
+    "type": "per_image",
+    "variants": {
+      "standard_1024x1024": 0.040,
+      "hd_1024x1024": 0.080
     },
-    "dall-e-3": {
-      "type": "per_image",
-      "variants": {
-        "standard_1024x1024": 0.040,
-        "hd_1024x1024": 0.080
-      },
-      "fallback": 0.120
-    },
-    "sora-2": {
-      "type": "per_second",
-      "rate": 0.15
-    }
+    "fallback": 0.120
+  },
+  "sora-2": {
+    "type": "per_second",
+    "rate": 0.10
   }
 }
 ```

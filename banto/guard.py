@@ -75,6 +75,21 @@ def _resolve_config_path(config_path: str | None) -> Path:
     return Path(__file__).parent / "config.json"
 
 
+def _resolve_pricing_path(config_dir: Path, pricing_file: str | None) -> Path:
+    """Resolve pricing file path: user override > bundled default."""
+    if pricing_file:
+        # Relative to config dir, or absolute
+        candidate = Path(pricing_file)
+        if not candidate.is_absolute():
+            candidate = config_dir / pricing_file
+        if candidate.exists():
+            return candidate
+    user_pricing = config_dir / "pricing.json"
+    if user_pricing.exists():
+        return user_pricing
+    return Path(__file__).parent / "pricing.json"
+
+
 class CostGuard:
     """
     API cost tracker with monthly budget enforcement.
@@ -102,8 +117,19 @@ class CostGuard:
         self.monthly_limit_usd: float = config["monthly_limit_usd"]
         self.provider_limits: dict[str, float] = config.get("provider_limits", {})
         self.model_limits: dict[str, float] = config.get("model_limits", {})
-        self.pricing: dict = config["pricing"]
         self.providers: dict = config.get("providers", {})
+
+        # Load pricing from separate file (or fall back to inline "pricing" key)
+        if "pricing" in config:
+            # Backward compatible: pricing embedded in config.json
+            self.pricing: dict = config["pricing"]
+        else:
+            pricing_file = config.get("pricing_file")
+            pricing_path = _resolve_pricing_path(
+                self.config_path.parent, pricing_file
+            )
+            with open(pricing_path, "r", encoding="utf-8") as f:
+                self.pricing = json.load(f)
 
         if data_dir:
             self.data_dir = Path(data_dir)

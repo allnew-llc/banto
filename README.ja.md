@@ -186,7 +186,7 @@ banto check sora-2 --seconds 10
 
 ## 設定
 
-デフォルト設定は `~/.config/banto/config.json` に配置されます。`banto init` で作成できます。
+デフォルト設定は `~/.config/banto/` に配置されます。`banto init` で `config.json`（予算設定）と `pricing.json`（料金テーブル）の2ファイルが作成されます。
 
 ### 予算上限
 
@@ -215,36 +215,34 @@ banto check sora-2 --seconds 10
 }
 ```
 
-### 料金設定
+### 料金設定（`pricing.json`）
 
-bantoにはOpenAI・Anthropic・Googleの主要モデルを網羅したデフォルト料金テーブルが同梱されています。**料金は静的に定義されており**、プロバイダのAPIから実行時に自動取得する機能はありません。
+料金テーブルは予算設定とは**別ファイル**（`~/.config/banto/pricing.json`）で管理されます。2026年3月時点のOpenAI・Anthropic・Googleの主要モデルの料金がサンプルとして同梱されています。
 
-> **静的テーブルである理由**: 2026年3月時点で、主要プロバイダ（OpenAI、Anthropic、xAI）はモデル単価を返す公開APIを提供していません。Google Cloudは[Billing Catalog API](https://cloud.google.com/billing/docs/how-to/get-pricing-information-api)でVertex AIのSKU単価を取得できますが、SKU名とモデル名の対応付けが容易ではありません。全プロバイダに共通して機能する唯一の実用的な方法は、静的テーブルの手動更新です。
+> **料金は静的であり、正確性は保証されません。** bantoはプロバイダのAPIから実行時に料金を取得しません。主要プロバイダ（OpenAI、Anthropic、xAI）はモデル単価を返す公開APIを提供していないためです。各プロバイダの公式料金ページで最新の料金を確認し、`pricing.json` を更新してください。料金テーブルの不正確さに起因する損害について、AllNew LLCは一切の責任を負いません。
 
-プロバイダが料金を改定した場合は、`~/.config/banto/config.json` を更新してください。新しいモデルを追加する場合は、`providers`（キー解決用）と `pricing`（コスト算定用）の両方にエントリを追加します。
+プロバイダが料金を改定した場合は、`~/.config/banto/pricing.json` を編集してください。新しいモデルを追加する場合は、`config.json` の `providers`（キー解決用）と `pricing.json`（コスト算定用）の両方にエントリを追加します。
 
 3種類の課金体系に対応しています:
 
 ```json
 {
-  "pricing": {
-    "gpt-4o": {
-      "type": "per_token",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01
+  "gpt-4o": {
+    "type": "per_token",
+    "input_per_1k": 0.0025,
+    "output_per_1k": 0.01
+  },
+  "dall-e-3": {
+    "type": "per_image",
+    "variants": {
+      "standard_1024x1024": 0.040,
+      "hd_1024x1024": 0.080
     },
-    "dall-e-3": {
-      "type": "per_image",
-      "variants": {
-        "standard_1024x1024": 0.040,
-        "hd_1024x1024": 0.080
-      },
-      "fallback": 0.120
-    },
-    "sora-2": {
-      "type": "per_second",
-      "rate": 0.15
-    }
+    "fallback": 0.120
+  },
+  "sora-2": {
+    "type": "per_second",
+    "rate": 0.10
   }
 }
 ```

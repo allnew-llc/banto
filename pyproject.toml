@@ -35,4 +35,4 @@ banto = "banto.__main__:main"
 include = ["banto*"]
 
 [tool.setuptools.package-data]
-banto = ["config.json"]
+banto = ["config.json", "pricing.json"]

@@ -266,6 +266,8 @@ def cmd_budget(args: list[str]) -> None:
 
 def cmd_init(args: list[str]) -> None:
     config_dest = CONFIG_DIR / "config.json"
+    pricing_dest = CONFIG_DIR / "pricing.json"
+
     if config_dest.exists():
         print(f"Config already exists: {config_dest}")
         overwrite = input("Overwrite with default? (y/N): ")
@@ -274,11 +276,21 @@ def cmd_init(args: list[str]) -> None:
             return
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    default_config = Path(__file__).parent / "config.json"
-    shutil.copy2(default_config, config_dest)
+
+    bundled = Path(__file__).parent
+    shutil.copy2(bundled / "config.json", config_dest)
     config_dest.chmod(0o640)
-    print(f"Config written to: {config_dest}")
-    print("Edit this file to customize pricing and budget limit.")
+
+    shutil.copy2(bundled / "pricing.json", pricing_dest)
+    pricing_dest.chmod(0o640)
+
+    print(f"Config written to:  {config_dest}")
+    print(f"Pricing written to: {pricing_dest}")
+    print()
+    print("Next steps:")
+    print("  1. Set your budget:   banto budget <amount>")
+    print("  2. Review pricing:    edit pricing.json to match current provider rates")
+    print("  3. Store API keys:    banto store <provider>")
 
 
 COMMANDS = {
