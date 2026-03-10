@@ -6,7 +6,22 @@ Keys are stored as generic passwords in the login keychain.
 """
 
 import os
+import re
 import subprocess
+
+# Provider name validation: alphanumeric, hyphens, underscores only
+_PROVIDER_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validate_provider(provider: str) -> str:
+    """Validate and normalize provider name for safe use in subprocess args."""
+    provider = provider.strip()
+    if not provider or not _PROVIDER_RE.match(provider):
+        raise ValueError(
+            f"Invalid provider name: {provider!r}. "
+            "Use only letters, digits, hyphens, and underscores."
+        )
+    return provider.lower()
 
 
 class KeyNotFoundError(Exception):
@@ -41,7 +56,8 @@ class KeychainStore:
         )
 
     def _service_name(self, provider: str) -> str:
-        return f"{self.prefix}-{provider.lower()}"
+        provider = _validate_provider(provider)
+        return f"{self.prefix}-{provider}"
 
     def get(self, provider: str) -> str | None:
         """Retrieve an API key from Keychain. Returns None if not found."""
@@ -64,7 +80,13 @@ class KeychainStore:
             return None
 
     def store(self, provider: str, api_key: str) -> bool:
-        """Store an API key in Keychain. Overwrites existing."""
+        """Store an API key in Keychain. Overwrites existing.
+
+        Note: The macOS ``security`` CLI requires the key as a command-line
+        argument (``-w <value>``), which is briefly visible in the process
+        table. This is a limitation of the ``security`` tool, not of banto.
+        The key is stored securely in Keychain once the command completes.
+        """
         service = self._service_name(provider)
         try:
             # Delete existing (ignore errors)

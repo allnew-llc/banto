@@ -13,7 +13,7 @@ This file shows three alternative backends:
 
 Usage:
     # With environment variables
-    export BANTO_KEY_OPENAI="sk-..."
+    export BANTO_KEY_OPENAI="<YOUR_API_KEY>"
     python examples/06_custom_backend.py
 
     # Or with 1Password

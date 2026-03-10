@@ -126,9 +126,6 @@ class CostGuard:
 
     def _load_usage(self) -> dict:
         usage_path = self._get_usage_file_path()
-        if not usage_path.exists():
-            return self._create_empty_usage()
-
         try:
             with open(usage_path, "r+", encoding="utf-8") as f:
                 _lock_file(f, exclusive=False)
@@ -142,10 +139,14 @@ class CostGuard:
                     return data
                 finally:
                     _unlock_file(f)
+        except FileNotFoundError:
+            return self._create_empty_usage()
         except (json.JSONDecodeError, KeyError):
             backup_path = usage_path.with_suffix(".json.corrupted")
-            if usage_path.exists():
+            try:
                 usage_path.rename(backup_path)
+            except OSError:
+                pass
             return self._create_empty_usage()
 
     def _save_usage(self, data: dict) -> None:

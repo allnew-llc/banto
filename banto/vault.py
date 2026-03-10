@@ -2,7 +2,7 @@
 vault.py - SecureVault: budget-gated API key access.
 
 The core design: API keys are only retrievable when budget allows.
-No budget = no key = no API call possible. Bypass-proof by construction.
+No budget = no key = no API call possible through banto's API.
 
 Uses a hold/settle pattern for pessimistic budget reservation:
 - get_key() reserves (holds) the estimated cost upfront

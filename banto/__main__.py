@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from .guard import CostGuard, CONFIG_DIR
-from .keychain import KeychainStore
+from .keychain import KeychainStore, _validate_provider
 from .vault import SecureVault
 
 
@@ -59,7 +59,11 @@ def cmd_store(args: list[str]) -> None:
         print("Example: banto store openai")
         sys.exit(1)
 
-    provider = args[0]
+    try:
+        provider = _validate_provider(args[0])
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
     keychain = KeychainStore()
 
     if keychain.exists(provider):
@@ -87,7 +91,11 @@ def cmd_delete(args: list[str]) -> None:
         print("Usage: banto delete <provider>")
         sys.exit(1)
 
-    provider = args[0]
+    try:
+        provider = _validate_provider(args[0])
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
     keychain = KeychainStore()
 
     if not keychain.exists(provider):
@@ -268,6 +276,7 @@ def cmd_init(args: list[str]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     default_config = Path(__file__).parent / "config.json"
     shutil.copy2(default_config, config_dest)
+    config_dest.chmod(0o640)
     print(f"Config written to: {config_dest}")
     print("Edit this file to customize pricing and budget limit.")
 
