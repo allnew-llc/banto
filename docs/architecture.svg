@@ -1,21 +1,21 @@
 <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="banto architecture diagram">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#1e3a8a"/>
-      <stop offset="100%" stop-color="#312e81"/>
+      <stop offset="0%" stop-color="#451a03"/>
+      <stop offset="100%" stop-color="#78350f"/>
     </linearGradient>
   </defs>
 
-  <!-- Background -->
+  <!-- Background (dark amber — banto storehouse keeper) -->
   <rect width="800" height="420" rx="16" fill="url(#bg)"/>
 
   <!-- Title -->
-  <text x="400" y="36" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="bold" fill="rgba(255,255,255,0.6)" text-anchor="middle" letter-spacing="0.1em">BANTO ARCHITECTURE</text>
+  <text x="400" y="36" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="bold" fill="rgba(251,191,36,0.7)" text-anchor="middle" letter-spacing="0.1em">BANTO ARCHITECTURE</text>
 
   <!-- Layer 1: Agent Layer -->
-  <rect x="20" y="56" width="760" height="72" rx="12" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <text x="44" y="82" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="white">Your Agent</text>
-  <text x="44" y="100" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(255,255,255,0.4)">Any LLM agent</text>
+  <rect x="20" y="56" width="760" height="72" rx="12" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <text x="44" y="82" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="rgba(255,255,255,0.9)">Your Agent</text>
+  <text x="44" y="100" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(255,255,255,0.35)">Any LLM agent</text>
   <rect x="160" y="66" width="290" height="52" rx="8" fill="white"/>
   <text x="305" y="89" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="bold" fill="#1e293b" text-anchor="middle">Agent Code</text>
   <text x="305" y="106" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="#64748b" text-anchor="middle">Requests API key via banto MCP server</text>
@@ -24,13 +24,13 @@
   <text x="617" y="106" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="#64748b" text-anchor="middle">get_api_key tool — budget-aware key retrieval</text>
 
   <!-- Arrow 1 -->
-  <text x="400" y="148" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.5)" text-anchor="middle">▼  request key with estimated cost  ▼</text>
+  <text x="400" y="148" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.45)" text-anchor="middle">▼  request key with estimated cost  ▼</text>
 
-  <!-- Layer 2: Budget Control (highlighted) -->
-  <rect x="20" y="162" width="760" height="92" rx="12" fill="rgba(251,191,36,0.12)" stroke="rgba(251,191,36,0.35)" stroke-width="1.5"/>
+  <!-- Layer 2: Budget Control (highlighted with amber) -->
+  <rect x="20" y="162" width="760" height="92" rx="12" fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.45)" stroke-width="1.5"/>
   <text x="44" y="194" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#fbbf24">Budget</text>
   <text x="44" y="212" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#fbbf24">Control</text>
-  <text x="44" y="232" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(251,191,36,0.6)">Structural enforcement</text>
+  <text x="44" y="232" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(251,191,36,0.5)">Structural enforcement</text>
 
   <rect x="160" y="172" width="195" height="72" rx="8" fill="white"/>
   <text x="257" y="198" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="bold" fill="#1e293b" text-anchor="middle">Hold</text>
@@ -48,12 +48,12 @@
   <text x="674" y="228" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="#64748b" text-anchor="middle">Free surplus budget</text>
 
   <!-- Arrow 2 -->
-  <text x="400" y="276" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.5)" text-anchor="middle">▼  budget OK → release key  ▼</text>
+  <text x="400" y="276" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.45)" text-anchor="middle">▼  budget OK → release key  ▼</text>
 
   <!-- Layer 3: Key Vault -->
-  <rect x="20" y="292" width="760" height="72" rx="12" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <text x="44" y="318" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="white">Key Vault</text>
-  <text x="44" y="336" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(255,255,255,0.4)">Secure backend</text>
+  <rect x="20" y="292" width="760" height="72" rx="12" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <text x="44" y="318" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="rgba(255,255,255,0.9)">Key Vault</text>
+  <text x="44" y="336" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="rgba(255,255,255,0.35)">Secure backend</text>
   <rect x="160" y="302" width="195" height="52" rx="8" fill="white"/>
   <text x="257" y="325" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="bold" fill="#1e293b" text-anchor="middle">macOS Keychain</text>
   <text x="257" y="342" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="#64748b" text-anchor="middle">Default backend</text>
@@ -65,7 +65,7 @@
   <text x="674" y="342" font-family="Arial,Helvetica,sans-serif" font-size="10" fill="#64748b" text-anchor="middle">Pluggable backend</text>
 
   <!-- Bottom -->
-  <text x="400" y="390" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.5)" text-anchor="middle">▼  API key returned → agent calls LLM  ▼</text>
-  <rect x="200" y="396" width="400" height="28" rx="8" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <text x="400" y="416" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="bold" fill="rgba(255,255,255,0.6)" text-anchor="middle">LLM Provider — OpenAI / Anthropic / Gemini</text>
+  <text x="400" y="390" font-family="Arial,Helvetica,sans-serif" font-size="12" fill="rgba(255,255,255,0.45)" text-anchor="middle">▼  API key returned → agent calls LLM  ▼</text>
+  <rect x="200" y="396" width="400" height="28" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="400" y="416" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="bold" fill="rgba(255,255,255,0.45)" text-anchor="middle">LLM Provider — OpenAI / Anthropic / Gemini</text>
 </svg>
