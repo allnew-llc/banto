@@ -8,7 +8,7 @@ A budget-gated API key vault designed to limit excessive API charges caused by u
 
 ## Problem
 
-Most projects store API keys in `.env` files or environment variables, where any process can read them. LLM agents can catch budget-check exceptions and call the API regardless. When agents run unexpectedly, this can result in significant charges.
+Most projects store API keys in `.env` files or environment variables, where processes running as the same user can read them. LLM agents can catch budget-check exceptions and call the API regardless. When agents run unexpectedly, this can result in significant charges.
 
 ## Solution
 
