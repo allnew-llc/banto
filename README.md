@@ -14,22 +14,9 @@ Most projects store API keys in `.env` files or environment variables, where pro
 
 banto makes budget enforcement **structural**: API keys are stored in macOS Keychain and only released through banto's API when the budget allows. No budget = no key = no API call through banto.
 
-```
-Agent requests API key
-        |
-        v
-  [Budget hold] --over--> BudgetExceededError (key never returned)
-        |
-       ok (estimated cost reserved)
-        v
-  [Keychain lookup] --> API key returned
-        |
-        v
-  Agent calls API
-        |
-        v
-  [Settle hold] --> Actual cost recorded, surplus budget freed
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="banto architecture diagram" width="800">
+</p>
 
 ## Requirements
 
