@@ -393,6 +393,11 @@ def cmd_init(args: list[str]) -> None:
     print("  3. Store API keys:    banto store <provider>")
 
 
+def cmd_sync(args: list[str]) -> None:
+    from .sync.cli import cmd_sync_dispatch
+    cmd_sync_dispatch(args)
+
+
 COMMANDS = {
     "status": cmd_status,
     "budget": cmd_budget,
@@ -402,6 +407,7 @@ COMMANDS = {
     "list": cmd_list,
     "check": cmd_check,
     "init": cmd_init,
+    "sync": cmd_sync,
 }
 
 
@@ -418,6 +424,7 @@ def main() -> None:
         print("  list                List stored keys and budget")
         print("  check <model> ...   Dry-run budget check")
         print("  init                Copy default config to ~/.config/banto/")
+        print("  sync <cmd>          Multi-platform secret sync (33 platforms)")
         print()
         print("Budget examples:")
         print("  banto budget                          Show all limits")
