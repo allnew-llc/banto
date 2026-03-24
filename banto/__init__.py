@@ -1,13 +1,16 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
 """
-banto - Budget-gated API key vault for LLM applications.
+banto - Local-first secret management for developers.
 
 Named after the bantō (番頭), the head clerk of Edo-period merchant houses
 who held the keys to the storehouse and managed the books.
 
-Combines pluggable secret storage with monthly budget enforcement.
-API keys are only accessible when the budget allows.
+Core: secure key storage via macOS Keychain with multi-platform sync.
+Optional modules:
+  - budget: LLM cost gating with hold/settle pattern
+  - lease: dynamic secrets with TTL and auto-revocation
+
 Default backend: macOS Keychain. Custom backends (1Password, env vars, etc.)
 can be plugged in via the SecretBackend protocol.
 """
@@ -27,4 +30,4 @@ __all__ = [
     "KeyNotFoundError",
     "ProfileManager",
 ]
-__version__ = "2.2.0"
+__version__ = "4.0.0"

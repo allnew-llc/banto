@@ -1,19 +1,24 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
 """
-vault.py - SecureVault: budget-gated API key access.
+vault.py - SecureVault: modular API key access with optional budget gating.
 
-The core design: API keys are only retrievable when budget allows.
-No budget = no key = no API call possible through banto's API.
+Core: secure key storage and retrieval via pluggable backends.
+Optional budget module: hold/settle pattern for pessimistic cost reservation.
 
-Uses a hold/settle pattern for pessimistic budget reservation:
+When budget=True:
 - get_key() reserves (holds) the estimated cost upfront
 - record_usage() settles the hold with actual cost, freeing any surplus
 - If record_usage() is never called, the hold stays — safe-side bias
+
+When budget=False (default):
+- get_key() returns the key directly without cost checks
+- record_usage() and budget methods are no-ops
 """
 
 import json
 import threading
+from pathlib import Path
 
 from .backend import SecretBackend
 from .guard import CostGuard, BudgetExceededError
@@ -23,27 +28,23 @@ from .profiles import ProfileManager
 
 class SecureVault:
     """
-    Budget-gated API key vault.
+    Modular API key vault with optional budget gating.
 
-    Combines secret storage with monthly budget enforcement.
-    ``get_key()`` reserves budget and retrieves the key in sequence.
-    ``record_usage()`` settles the reservation with actual cost.
+    Core functionality: secure key storage and retrieval.
+    Enable ``budget=True`` to add LLM cost control (hold/settle pattern).
 
     The secret backend is pluggable. By default, macOS Keychain is used.
     Pass ``backend=`` to use 1Password, env vars, or any custom store.
 
     Usage:
-        vault = SecureVault(caller="my_mcp")
+        # Simple mode — no budget, just key management:
+        vault = SecureVault()
+        key = vault.get_key(provider="openai")
 
-        # Or with a custom backend:
-        vault = SecureVault(caller="my_mcp", backend=my_1password_backend)
-
-        # Main loop: get_key() holds budget, record_usage() settles
+        # Budget mode — cost-gated access:
+        vault = SecureVault(budget=True, caller="my_mcp")
         key = vault.get_key(model="gpt-4o",
                             input_tokens=1000, output_tokens=500)
-        response = openai.chat.completions.create(..., api_key=key)
-
-        # Settle with actual usage (frees surplus budget)
         vault.record_usage(model="gpt-4o",
                            input_tokens=800, output_tokens=400,
                            provider="openai", operation="chat")
@@ -51,13 +52,13 @@ class SecureVault:
         # Role-based model resolution via profiles:
         key = vault.get_key(role="chat",
                             input_tokens=1000, output_tokens=500)
-        # Resolves "chat" -> model from active profile (e.g. "claude-sonnet-4-6")
     """
 
     def __init__(
         self,
         caller: str = "unknown",
         *,
+        budget: bool | None = None,
         backend: SecretBackend | None = None,
         config_path: str | None = None,
         data_dir: str | None = None,
@@ -66,6 +67,9 @@ class SecureVault:
         """
         Args:
             caller: Identifier for the service using this vault.
+            budget: Enable budget gating. None = auto-detect from config
+                    (enabled if monthly_limit_usd > 0). False = disabled.
+                    True = enabled (requires config with limits).
             backend: Secret storage backend. Defaults to macOS KeychainStore.
                      Any object implementing SecretBackend protocol works.
             config_path: Path to config.json (optional override).
@@ -73,23 +77,60 @@ class SecureVault:
             keychain_prefix: Keychain service name prefix (default: "banto").
                              Ignored when backend is provided.
         """
-        self._guard = CostGuard(
-            config_path=config_path, caller=caller, data_dir=data_dir
-        )
         self._backend: SecretBackend = backend or KeychainStore(
             service_prefix=keychain_prefix
         )
-        self._provider_map = self._build_provider_map()
-        self._holds_lock = threading.Lock()
-        self._pending_holds: dict[str, list[str]] = {}  # "model:provider" -> [hold_ids]
 
-        # Load config for profile manager (same file the guard uses)
+        # Budget: lazy init — only create CostGuard when needed
+        self._guard: CostGuard | None = None
+        self._provider_map: dict[str, str] = {}
+        self._holds_lock = threading.Lock()
+        self._pending_holds: dict[str, list[str]] = {}
+        self._profile_manager: ProfileManager | None = None
+        self._config_path = config_path
+        self._data_dir = data_dir
+        self._caller = caller
+
+        # Determine budget mode
+        if budget is True:
+            self._init_budget()
+        elif budget is None:
+            # Auto-detect: enable if config exists with monthly_limit > 0
+            self._try_auto_budget()
+        # budget=False: leave _guard as None
+
+    def _init_budget(self) -> None:
+        """Initialize budget subsystem (CostGuard + profiles)."""
+        self._guard = CostGuard(
+            config_path=self._config_path, caller=self._caller,
+            data_dir=self._data_dir,
+        )
+        self._provider_map = self._build_provider_map()
         with open(self._guard.config_path, "r", encoding="utf-8") as f:
             config_data = json.load(f)
         self._profile_manager = ProfileManager(config_data)
 
+    def _try_auto_budget(self) -> None:
+        """Auto-detect budget mode from config."""
+        from .guard import CONFIG_DIR
+        cfg_path = Path(self._config_path) if self._config_path else CONFIG_DIR / "config.json"
+        if cfg_path.exists():
+            try:
+                data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if data.get("monthly_limit_usd", 0) > 0:
+                    self._init_budget()
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    @property
+    def budget_enabled(self) -> bool:
+        """Whether budget gating is active."""
+        return self._guard is not None
+
     def _build_provider_map(self) -> dict[str, str]:
         """Build model -> provider mapping from config."""
+        if self._guard is None:
+            return {}
         mapping: dict[str, str] = {}
         for provider, info in self._guard.providers.items():
             for model in info.get("models", []):
@@ -141,37 +182,53 @@ class SecureVault:
         output_tokens: int | None = None,
     ) -> str:
         """
-        Get an API key, gated by budget hold.
+        Get an API key, optionally gated by budget hold.
 
-        Reserves the estimated cost in the usage log (pessimistic hold),
-        then retrieves the key from Keychain. If record_usage() is called
-        later, the hold is settled with actual cost. If not, the hold
-        amount stays reserved — budget errs on the safe side.
+        When budget is enabled: reserves estimated cost before returning key.
+        When budget is disabled: returns key directly by provider name.
 
         Args:
-            model: Model name (e.g. "gpt-4o", "dall-e-3").
-                   If both model and role are given, model takes priority.
-            role: Task role (e.g. "chat", "verify", "embed").
-                  Resolved to a model via the active profile.
-            provider: Provider name. Auto-resolved from model if omitted.
-            (remaining args): Cost estimation parameters.
+            model: Model name (e.g. "gpt-4o"). Required when budget enabled.
+            role: Task role (e.g. "chat"). Resolved via active profile.
+            provider: Provider name. Required when budget disabled and
+                      model is not specified. Auto-resolved from model
+                      when budget enabled.
+            (remaining args): Cost estimation parameters (budget mode only).
 
         Returns:
             The API key string.
 
         Raises:
-            BudgetExceededError: Estimated cost exceeds remaining budget.
+            BudgetExceededError: Budget enabled and cost exceeds limit.
             KeyNotFoundError: No key stored for the provider.
-            ValueError: Neither model nor role specified, or provider
-                        cannot be determined.
+            ValueError: Cannot determine which key to retrieve.
         """
+        # --- No budget: simple key retrieval ---
+        if self._guard is None:
+            if provider:
+                key = self._backend.get(provider)
+                if key is None:
+                    raise KeyNotFoundError(provider)
+                return key
+            if model:
+                resolved = self._provider_map.get(model, model)
+                key = self._backend.get(resolved)
+                if key is None:
+                    raise KeyNotFoundError(resolved)
+                return key
+            raise ValueError(
+                "Specify 'provider' or 'model' to retrieve a key"
+            )
+
+        # --- Budget mode: hold/settle pattern ---
         if model is None and role is None:
             raise ValueError("Either 'model' or 'role' must be specified")
         if model is None:
-            assert role is not None  # guaranteed by the check above
+            assert role is not None
+            assert self._profile_manager is not None
             model = self._profile_manager.resolve_model(role)
 
-        assert model is not None  # narrowing for type checker
+        assert model is not None
         resolved = self._resolve_provider(provider, model)
 
         # Step 1: budget hold (raises BudgetExceededError if over)
@@ -189,11 +246,10 @@ class SecureVault:
         # Step 2: key retrieval (only reached if budget allows)
         key = self._backend.get(resolved)
         if key is None:
-            # Roll back the hold to free reserved budget
             self._guard.void_hold(hold_id)
             raise KeyNotFoundError(resolved)
 
-        # Track hold for later settlement (FIFO per model:provider)
+        # Track hold for later settlement
         hold_key = f"{model}:{resolved}"
         with self._holds_lock:
             self._pending_holds.setdefault(hold_key, []).append(hold_id)
@@ -220,8 +276,10 @@ class SecureVault:
 
         If a matching hold exists (from get_key()), settles it with
         actual cost, freeing any surplus budget. Otherwise falls back
-        to a direct usage record.
+        to a direct usage record. No-op when budget is disabled.
         """
+        if self._guard is None:
+            return {"budget_enabled": False}
         resolved = provider or self._provider_map.get(model, provider)
         hold_key = f"{model}:{resolved}"
 
@@ -261,18 +319,27 @@ class SecureVault:
             operation=operation,
         )
 
-    # --- Budget queries ---
+    # --- Budget queries (no-ops when budget disabled) ---
 
     def get_budget_status(self) -> dict:
-        """Get current month's budget status."""
-        return self._guard.get_remaining_budget()
+        """Get current month's budget status. Returns empty dict if budget disabled."""
+        if self._guard is None:
+            return {"budget_enabled": False}
+        status = self._guard.get_remaining_budget()
+        status["budget_enabled"] = True
+        return status
 
     def estimate_cost(self, model: str, **kwargs) -> float:
-        """Estimate cost without recording or checking budget."""
+        """Estimate cost without recording or checking budget. Returns 0 if budget disabled."""
+        if self._guard is None:
+            return 0.0
         return self._guard.estimate_cost(model=model, **kwargs)
 
     def set_budget(self, **kwargs) -> None:
-        """Update budget limits. See CostGuard.set_budget() for args."""
+        """Update budget limits. Initializes budget subsystem if not already active."""
+        if self._guard is None:
+            self._init_budget()
+        assert self._guard is not None
         self._guard.set_budget(**kwargs)
 
     # --- Profile management ---
