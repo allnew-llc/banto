@@ -6,6 +6,7 @@ CLI entry point: python -m banto <command>
 Commands:
     status              Show budget status
     store <provider>    Store an API key in Keychain
+    register [provider] Open browser popup to store an API key
     list                List stored provider keys
     check <model> ...   Dry-run budget check for a model
     init                Copy default config to ~/.config/banto/
@@ -402,6 +403,16 @@ def cmd_init(args: list[str]) -> None:
     print("  3. Store API keys:    banto store <provider>")
 
 
+def cmd_register(args: list[str]) -> None:
+    from .register_popup import serve_register_popup
+
+    provider_hint = args[0] if args else None
+    print("Opening browser for API key registration...")
+    url = serve_register_popup(provider_hint=provider_hint, blocking=True)
+    print(f"Server was at: {url}")
+    print("Done.")
+
+
 def cmd_sync(args: list[str]) -> None:
     from .sync.cli import cmd_sync_dispatch
     cmd_sync_dispatch(args)
@@ -417,6 +428,7 @@ COMMANDS = {
     "budget": cmd_budget,
     "profile": cmd_profile,
     "store": cmd_store,
+    "register": cmd_register,
     "delete": cmd_delete,
     "list": cmd_list,
     "check": cmd_check,
@@ -434,7 +446,8 @@ def main() -> None:
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
         print("  profile [name]      Show or set the active model profile")
-        print("  store <provider>    Store an API key in Keychain")
+        print("  store <provider>    Store an API key in Keychain (terminal)")
+        print("  register [provider] Open browser popup to store an API key")
         print("  delete <provider>   Delete an API key from Keychain")
         print("  list                List stored keys and budget")
         print("  check <model> ...   Dry-run budget check")

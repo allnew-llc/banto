@@ -1,5 +1,50 @@
 # Changelog
 
+## 5.0.0 (2026-03-24) — Agent-Native Secret Management
+
+### Architecture: Agent + Human collaboration model
+
+banto is now designed for AI coding agents (Claude Code, Codex) to orchestrate
+secret management while humans provide the actual secret values via browser.
+
+```
+Agent (Claude/Codex)              Human
+  │                                 │
+  ├─ banto_sync_status             │
+  ├─ banto_validate_keychain       │
+  ├─ banto_register_key ──────────▶ Browser popup
+  │                                 │ enters API key
+  ├─ banto_sync_push               │
+  └─ (never sees secret values)    └─ (only source of values)
+```
+
+### New: MCP Server for Claude Code
+
+- `banto-mcp` entry point — register in `.mcp.json` for native tool access
+- 9 tools: sync_status, sync_push, sync_audit, validate, validate_keychain,
+  budget_status, register_key, lease_list, lease_cleanup
+- Agent NEVER receives secret values — all tools return metadata only
+- `banto_register_key` opens a browser popup for human key entry
+
+### New: Browser registration popup
+
+- `banto register [provider]` — opens minimal, focused browser popup
+- Provider presets with auto-filled env var names
+- Password input with show/hide, stores directly to Keychain
+- Single-use: server stops after successful registration
+- Localhost only (127.0.0.1), value never echoed back
+
+### New: CLAUDE.md agent instructions
+
+- Defines safe/prohibited operations for AI agents
+- MCP tool usage guide with common workflows
+- Critical rule: agents must NEVER read secret values
+
+### Breaking Changes
+
+- Major version bump (4.x → 5.0) due to new agent-native architecture
+- `banto-mcp` requires optional `mcp` dependency: `pip install banto[mcp]`
+
 ## 4.2.0 (2026-03-24) — Security Audit Response
 
 Addresses all findings from Codex security re-audit (2026-03-24).

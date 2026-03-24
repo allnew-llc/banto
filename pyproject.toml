@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "banto"
-version = "4.2.0"
+version = "5.0.0"
 description = "Local-first secret management with optional budget gating and dynamic leases"
 readme = "README.md"
 license = "LicenseRef-Dual"
@@ -28,8 +28,12 @@ classifiers = [
 Homepage = "https://github.com/allnew-llc/banto"
 Issues = "https://github.com/allnew-llc/banto/issues"
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
 [project.scripts]
 banto = "banto.__main__:main"
+banto-mcp = "banto.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["banto*"]
