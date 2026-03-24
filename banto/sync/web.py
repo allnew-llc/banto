@@ -652,18 +652,25 @@ async function validateKeychain() {
 }
 
 function showValidateResults(title, results) {
-  var valid = results.filter(function(x) { return x.valid; }).length;
-  var invalid = results.filter(function(x) { return !x.valid; }).length;
-  if (invalid === 0) toast('Validate: all ' + valid + ' keys valid');
-  else toast('Validate: ' + valid + ' valid, ' + invalid + ' invalid', 'fail');
+  var passed = results.filter(function(x) { return (x.status || (x.valid?'pass':'fail')) === 'pass'; }).length;
+  var failed = results.filter(function(x) { return (x.status || (x.valid?'pass':'fail')) === 'fail'; }).length;
+  var unknown = results.filter(function(x) { return (x.status || (x.valid?'pass':'fail')) === 'unknown'; }).length;
+  var parts = [];
+  if (passed) parts.push(passed + ' passed');
+  if (failed) parts.push(failed + ' failed');
+  if (unknown) parts.push(unknown + ' unknown');
+  toast('Validate: ' + parts.join(', '), failed > 0 ? 'fail' : (unknown > 0 ? 'info' : undefined));
 
   var html = '<div class="card" style="margin-top:12px;">';
   html += '<h3>' + esc(title) + ' — Validation Results</h3>';
   html += '<table><thead><tr><th>Key</th><th>Provider</th><th>Status</th><th>Details</th></tr></thead><tbody>';
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
-    var cls = r.valid ? 'ok' : 'fail';
-    var badge = r.valid ? '<span class="badge badge-ok">PASS</span>' : '<span class="badge badge-fail">FAIL</span>';
+    var st = r.status || (r.valid ? 'pass' : 'fail');
+    var badge;
+    if (st === 'pass') badge = '<span class="badge badge-ok">PASS</span>';
+    else if (st === 'fail') badge = '<span class="badge badge-fail">FAIL</span>';
+    else badge = '<span class="badge" style="background:#2d1f00;color:#d29922;">UNKNOWN</span>';
     html += '<tr><td class="mono">' + esc(r.name) + '</td><td>' + esc(r.provider) + '</td><td>' + badge + '</td><td class="na">' + esc(r.message) + '</td></tr>';
   }
   html += '</tbody></table></div>';
@@ -1430,6 +1437,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                 "name": name,
                 "provider": vr.provider,
                 "valid": vr.valid,
+                "status": vr.status,
                 "message": vr.message,
             })
         self._json_response({"ok": True, "results": results})
@@ -1488,6 +1496,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                             "name": svc,
                             "provider": vr.provider,
                             "valid": vr.valid,
+                "status": vr.status,
                             "message": vr.message,
                         })
                     break

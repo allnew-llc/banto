@@ -731,14 +731,13 @@ def cmd_sync_validate(args: list[str]) -> None:
             print(f"  SKIP  {name}: no value")
             continue
         result = validate_key(name, value)
-        if result.valid:
-            if "No validator" in result.message:
-                print(f"  —     {name}: {result.message}")
-            else:
-                print(f"  PASS  {name}: {result.message}")
-        else:
-            print(f"  FAIL  {name}: {result.message}")
+        if result.status == "pass":
+            print(f"  PASS    {name}: {result.message}")
+        elif result.status == "fail":
+            print(f"  FAIL    {name}: {result.message}")
             all_valid = False
+        else:
+            print(f"  UNKNOWN {name}: {result.message}")
 
     print()
     if not all_valid:
