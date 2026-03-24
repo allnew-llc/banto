@@ -10,6 +10,10 @@ Compatible with:
 Critical design: agents NEVER see secret values.
 All tools return metadata, status, and results — never API key values.
 
+Each tool returns a dict with:
+  - structuredContent: concise JSON for widget rendering and model consumption
+  - content: text narration for conversation display
+
 Launch:
     banto-mcp                          # stdio (Claude Code)
     banto-mcp --transport sse          # SSE (Apps SDK dev)
@@ -45,16 +49,43 @@ async def banto_sync_status() -> dict:
 
     config = SyncConfig.load()
     if not config.secrets:
-        return {"secrets": [], "message": "No secrets configured in sync.json"}
+        return {
+            "structuredContent": {
+                "secrets": [], "count": 0, "in_sync": 0, "drifted": 0,
+            },
+            "content": "No secrets configured in sync.json",
+        }
 
     entries = check_status(config)
-    secrets = [
-        {"name": e.secret_name, "env_name": e.env_name,
-         "keychain_exists": e.keychain_exists,
-         "targets": {label: status for label, status in e.target_status.items()}}
-        for e in entries
-    ]
-    return {"secrets": secrets, "count": len(secrets)}
+    secrets = []
+    in_sync = 0
+    for e in entries:
+        targets = {label: status for label, status in e.target_status.items()}
+        all_ok = e.keychain_exists and all(v is True for v in targets.values())
+        if all_ok:
+            in_sync += 1
+        secrets.append({
+            "name": e.secret_name,
+            "env_name": e.env_name,
+            "keychain_exists": e.keychain_exists,
+            "targets": targets,
+        })
+
+    total = len(secrets)
+    drifted = total - in_sync
+
+    return {
+        "structuredContent": {
+            "secrets": secrets,
+            "count": total,
+            "in_sync": in_sync,
+            "drifted": drifted,
+        },
+        "content": (
+            f"{total} secrets configured, {in_sync} in sync, "
+            f"{drifted} drifted"
+        ),
+    }
 
 
 # ── Tool 2: sync_push (destructive) ──────────────────────────────
@@ -82,15 +113,29 @@ async def banto_sync_push(name: str = "") -> dict:
     else:
         report = sync_all(config)
 
+    results = [
+        {"name": r.secret_name, "target": r.target_label,
+         "success": r.success, "message": r.message}
+        for r in report.results
+    ]
+
+    scope = f"secret '{name}'" if name else "all secrets"
+    if report.all_ok:
+        summary = f"Pushed {scope}: {report.ok_count} target(s) updated successfully"
+    else:
+        summary = (
+            f"Pushed {scope}: {report.ok_count} OK, "
+            f"{report.fail_count} failed"
+        )
+
     return {
-        "ok": report.all_ok,
-        "ok_count": report.ok_count,
-        "fail_count": report.fail_count,
-        "results": [
-            {"name": r.secret_name, "target": r.target_label,
-             "success": r.success, "message": r.message}
-            for r in report.results
-        ],
+        "structuredContent": {
+            "ok": report.all_ok,
+            "ok_count": report.ok_count,
+            "fail_count": report.fail_count,
+            "results": results,
+        },
+        "content": summary,
     }
 
 
@@ -167,7 +212,22 @@ async def banto_sync_audit(max_age_days: int = 0) -> dict:
             except (ValueError, TypeError):
                 issues.append(f"STALE {name}: unparseable timestamp")
 
-    return {"ok": len(issues) == 0, "issues": issues}
+    ok = len(issues) == 0
+    if ok:
+        summary = "Audit passed: no drift or staleness detected"
+    else:
+        summary = f"Audit found {len(issues)} issue(s): " + "; ".join(issues[:3])
+        if len(issues) > 3:
+            summary += f" (+{len(issues) - 3} more)"
+
+    return {
+        "structuredContent": {
+            "ok": ok,
+            "issue_count": len(issues),
+            "issues": issues,
+        },
+        "content": summary,
+    }
 
 
 # ── Tool 4: validate (read-only, openWorld) ──────────────────────
@@ -191,20 +251,53 @@ async def banto_validate() -> dict:
 
     config = SyncConfig.load()
     if not config.secrets:
-        return {"results": [], "message": "No secrets in sync.json"}
+        return {
+            "structuredContent": {"results": [], "total": 0, "pass": 0, "fail": 0, "unknown": 0},
+            "content": "No secrets in sync.json",
+        }
 
     kc = KeychainStore(service_prefix=config.keychain_service)
     results = []
+    pass_count = 0
+    fail_count = 0
+    unknown_count = 0
+
     for name, entry in config.secrets.items():
         value = kc.get(entry.account)
         if not value:
             results.append({"name": name, "provider": name,
                            "status": "unknown", "message": "Not in Keychain"})
+            unknown_count += 1
             continue
         vr = validate_key(name, value)
         results.append({"name": name, "provider": vr.provider,
                         "status": vr.status, "message": vr.message})
-    return {"results": results}
+        if vr.status == "pass":
+            pass_count += 1
+        elif vr.status == "fail":
+            fail_count += 1
+        else:
+            unknown_count += 1
+
+    total = len(results)
+    summary_parts = []
+    if pass_count:
+        summary_parts.append(f"{pass_count} passed")
+    if fail_count:
+        summary_parts.append(f"{fail_count} failed")
+    if unknown_count:
+        summary_parts.append(f"{unknown_count} unknown")
+
+    return {
+        "structuredContent": {
+            "results": results,
+            "total": total,
+            "pass": pass_count,
+            "fail": fail_count,
+            "unknown": unknown_count,
+        },
+        "content": f"Validated {total} keys: {', '.join(summary_parts)}",
+    }
 
 
 # ── Tool 5: validate_keychain (read-only, openWorld) ─────────────
@@ -231,7 +324,10 @@ async def banto_validate_keychain() -> dict:
         ["security", "dump-keychain"], capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return {"results": [], "message": "Failed to read Keychain"}
+        return {
+            "structuredContent": {"results": [], "total": 0, "pass": 0, "fail": 0, "unknown": 0},
+            "content": "Failed to read Keychain",
+        }
 
     svce_re = re.compile(r'"svce"<blob>="([^"]*)"')
     acct_re = re.compile(r'"acct"<blob>="([^"]*)"')
@@ -258,6 +354,10 @@ async def banto_validate_keychain() -> dict:
 
     seen: set[str] = set()
     results = []
+    pass_count = 0
+    fail_count = 0
+    unknown_count = 0
+
     for svc, acct in entries_found:
         if not svc or svc in seen or should_exclude(svc):
             continue
@@ -274,15 +374,44 @@ async def banto_validate_keychain() -> dict:
                         vr = validate_key(svc, val)
                         results.append({"name": svc, "provider": vr.provider,
                                         "status": vr.status, "message": vr.message})
+                        if vr.status == "pass":
+                            pass_count += 1
+                        elif vr.status == "fail":
+                            fail_count += 1
+                        else:
+                            unknown_count += 1
                     else:
                         results.append({"name": svc, "provider": pattern,
                                         "status": "unknown", "message": "Could not retrieve"})
+                        unknown_count += 1
                 except Exception:
                     results.append({"name": svc, "provider": pattern,
                                     "status": "unknown", "message": "Retrieval error"})
+                    unknown_count += 1
                 break
 
-    return {"results": results}
+    total = len(results)
+    summary_parts = []
+    if pass_count:
+        summary_parts.append(f"{pass_count} passed")
+    if fail_count:
+        summary_parts.append(f"{fail_count} failed")
+    if unknown_count:
+        summary_parts.append(f"{unknown_count} unknown")
+
+    return {
+        "structuredContent": {
+            "results": results,
+            "total": total,
+            "pass": pass_count,
+            "fail": fail_count,
+            "unknown": unknown_count,
+        },
+        "content": (
+            f"Scanned Keychain: found {total} provider keys"
+            + (f" ({', '.join(summary_parts)})" if summary_parts else "")
+        ),
+    }
 
 
 # ── Tool 6: budget_status (read-only) ────────────────────────────
@@ -303,9 +432,24 @@ async def banto_budget_status() -> dict:
         guard = CostGuard()
         status = guard.get_remaining_budget()
         status["budget_enabled"] = True
-        return status
+
+        remaining = status.get("remaining_usd", 0)
+        used = status.get("used_usd", 0)
+        limit = status.get("monthly_limit_usd", 0)
+        month = status.get("month", "")
+
+        return {
+            "structuredContent": status,
+            "content": (
+                f"Budget for {month}: ${used:.2f} used of ${limit:.2f} "
+                f"(${remaining:.2f} remaining)"
+            ),
+        }
     except Exception:
-        return {"budget_enabled": False, "message": "Budget not configured"}
+        return {
+            "structuredContent": {"budget_enabled": False},
+            "content": "Budget not configured",
+        }
 
 
 # ── Tool 7: register_key (not destructive, openWorld) ────────────
@@ -332,14 +476,16 @@ async def banto_register_key(provider: str = "") -> dict:
     url = serve_register_popup(provider_hint=provider, blocking=False)
 
     return {
-        "message": "Browser opened for key registration",
-        "url": url,
-        "provider": provider or "(any)",
-        "next_steps": [
-            "Wait for user to enter the key in the browser",
-            "Use banto_validate to verify the key works",
-            "Use banto_sync_push to deploy to cloud targets",
-        ],
+        "structuredContent": {
+            "provider": provider or "(any)",
+            "url": url,
+            "status": "popup_opened",
+        },
+        "content": (
+            f"Browser opened for key registration"
+            + (f" (provider: {provider})" if provider else "")
+            + f". URL: {url}"
+        ),
     }
 
 
@@ -360,7 +506,23 @@ async def banto_lease_list() -> dict:
 
     mgr = LeaseManager()
     active = mgr.list_leases()
-    return {"leases": active, "count": len(active)}
+
+    count = len(active)
+    if count == 0:
+        summary = "No active leases"
+    else:
+        names = [l.get("name", "?") for l in active[:5]]
+        summary = f"{count} active lease(s): {', '.join(names)}"
+        if count > 5:
+            summary += f" (+{count - 5} more)"
+
+    return {
+        "structuredContent": {
+            "leases": active,
+            "count": count,
+        },
+        "content": summary,
+    }
 
 
 # ── Tool 9: lease_cleanup (destructive) ──────────────────────────
@@ -379,7 +541,18 @@ async def banto_lease_cleanup() -> dict:
 
     mgr = LeaseManager()
     revoked = mgr.cleanup()
-    return {"revoked_count": revoked}
+
+    if revoked == 0:
+        summary = "No expired leases to clean up"
+    else:
+        summary = f"Revoked {revoked} expired lease(s)"
+
+    return {
+        "structuredContent": {
+            "revoked_count": revoked,
+        },
+        "content": summary,
+    }
 
 
 # ── Entry point ──────────────────────────────────────────────────
