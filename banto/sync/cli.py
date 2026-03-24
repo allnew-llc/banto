@@ -624,39 +624,92 @@ def cmd_sync_import(args: list[str]) -> None:
 
 
 def cmd_sync_validate(args: list[str]) -> None:
-    """Validate API keys against provider endpoints."""
-    from .validate import validate_key, list_supported_providers
+    """Validate API keys against provider endpoints.
+
+    If sync.json has secrets, validates those.
+    With --keychain flag (or no sync.json secrets), scans Keychain directly
+    for known provider patterns.
+    """
+    from .validate import validate_key, list_supported_providers, SERVICE_PATTERNS
 
     config, _ = _load_config(args)
-    kc = KeychainStore(service_prefix=config.keychain_service)
+    scan_keychain = "--keychain" in args or not config.secrets
 
-    if not config.secrets:
-        print("No secrets configured.")
+    keys_to_test: list[tuple[str, str]] = []  # (name, value)
+
+    if scan_keychain:
+        # Scan Keychain for known API key patterns
+        import subprocess as sp
+        result = sp.run(
+            ["security", "dump-keychain"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            import re
+            svce_re = re.compile(r'"svce"<blob>="([^"]*)"')
+            acct_re = re.compile(r'"acct"<blob>="([^"]*)"')
+            current_service = ""
+            for line in result.stdout.splitlines():
+                m = svce_re.search(line)
+                if m:
+                    current_service = m.group(1)
+                    continue
+                m = acct_re.search(line)
+                if m and current_service:
+                    # Check if this service matches any known provider
+                    svc_lower = current_service.lower()
+                    for pattern in SERVICE_PATTERNS:
+                        if pattern in svc_lower:
+                            try:
+                                val = sp.run(
+                                    ["security", "find-generic-password",
+                                     "-s", current_service, "-a", m.group(1), "-w"],
+                                    capture_output=True, text=True,
+                                ).stdout.strip()
+                                if val:
+                                    keys_to_test.append((current_service, val))
+                            except Exception:
+                                pass
+                            break
+                    current_service = ""
+    else:
+        # Use sync.json secrets
+        kc = KeychainStore(service_prefix=config.keychain_service)
+        for name, entry in config.secrets.items():
+            value = kc.get(entry.account)
+            if value:
+                keys_to_test.append((name, value))
+            else:
+                keys_to_test.append((name, ""))
+
+    if not keys_to_test:
+        print("No keys found to validate.")
+        print(f"  Supported providers: {', '.join(list_supported_providers())}")
         return
 
-    print(f"\nBANTO SYNC VALIDATE — Testing {len(config.secrets)} key(s)\n")
-    print(f"  Supported providers: {', '.join(list_supported_providers())}\n")
+    print(f"\nBANTO SYNC VALIDATE — Testing {len(keys_to_test)} key(s)\n")
 
     all_valid = True
-    for name, entry in config.secrets.items():
-        value = kc.get(entry.account)
-        if value is None:
-            print(f"  SKIP  {name}: not in Keychain")
+    for name, value in keys_to_test:
+        if not value:
+            print(f"  SKIP  {name}: no value")
             continue
-
         result = validate_key(name, value)
         if result.valid:
-            print(f"  PASS  {name}: {result.message}")
+            if "No validator" in result.message:
+                print(f"  —     {name}: {result.message}")
+            else:
+                print(f"  PASS  {name}: {result.message}")
         else:
             print(f"  FAIL  {name}: {result.message}")
             all_valid = False
 
     print()
     if not all_valid:
-        print("  Some keys are invalid. Fix before pushing.")
+        print("  Some keys are invalid.")
         sys.exit(1)
     else:
-        print("  All keys valid.")
+        print("  All testable keys valid.")
 
 
 SYNC_COMMANDS = {
