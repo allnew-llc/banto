@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""GitLab CI/CD variables driver — uses `glab` CLI."""
+"""GitLab CI/CD variables driver — uses `glab` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `glab variable set` command reads the value from stdin when - is used.
+"""
 from __future__ import annotations
 
 import shutil
@@ -44,12 +48,16 @@ class GitLabCIDriver(PlatformDriver):
         )
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass value via stdin to avoid argv exposure in ps aux.
+        # `glab variable set` reads from stdin when --value is omitted
+        # and input is piped.
         # Try update first, then create
         result = subprocess.run(
             [
                 _find_glab(), "variable", "update", env_name,
-                "--value", value, "--masked", "-R", project,
+                "--masked", "-R", project,
             ],
+            input=value,
             capture_output=True,
             text=True,
         )
@@ -59,8 +67,9 @@ class GitLabCIDriver(PlatformDriver):
         result = subprocess.run(
             [
                 _find_glab(), "variable", "set", env_name,
-                "--value", value, "--masked", "-R", project,
+                "--masked", "-R", project,
             ],
+            input=value,
             capture_output=True,
             text=True,
         )

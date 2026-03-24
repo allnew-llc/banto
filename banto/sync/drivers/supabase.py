@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Supabase Edge Functions secrets driver — uses `supabase` CLI."""
+"""Supabase Edge Functions secrets driver — uses `supabase` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `supabase secrets set` command reads KEY=VALUE from stdin when piped.
+"""
 from __future__ import annotations
 
 import shutil
@@ -48,12 +52,13 @@ class SupabaseDriver(PlatformDriver):
         )
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass KEY=VALUE via stdin to avoid argv exposure in ps aux.
         result = subprocess.run(
             [
                 _find_supabase(), "secrets", "set",
-                f"{env_name}={value}",
                 "--project-ref", project,
             ],
+            input=f"{env_name}={value}",
             capture_output=True,
             text=True,
         )

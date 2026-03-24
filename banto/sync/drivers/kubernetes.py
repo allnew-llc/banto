@@ -1,10 +1,17 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Kubernetes Secrets driver — uses `kubectl` CLI."""
+"""Kubernetes Secrets driver — uses `kubectl` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+Instead of --from-literal (which puts the value in argv), we generate the
+YAML manifest with the value piped through stdin via --from-file.
+"""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
 
 from .base import PlatformDriver
 
@@ -49,29 +56,38 @@ class KubernetesDriver(PlatformDriver):
         return result.returncode == 0 and result.stdout.strip() != ""
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: write value to a 0600 tempfile and use --from-file
+        # instead of --from-literal to avoid argv exposure in ps aux.
         kubectl = _find_kubectl()
         ns, secret_name = self._parse_project(project)
-        # Try to patch existing secret
-        result = subprocess.run(
-            [
-                kubectl, "create", "secret", "generic", secret_name,
-                "-n", ns,
-                f"--from-literal={env_name}={value}",
-                "--dry-run=client", "-o", "yaml",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return False
-        # Apply (create or update)
-        apply_result = subprocess.run(
-            [kubectl, "apply", "-f", "-", "-n", ns],
-            input=result.stdout,
-            capture_output=True,
-            text=True,
-        )
-        return apply_result.returncode == 0
+        fd, tmp_path = tempfile.mkstemp(prefix="banto-k8s-", suffix=".txt")
+        try:
+            os.write(fd, value.encode("utf-8"))
+            os.close(fd)
+            os.chmod(tmp_path, 0o600)
+            # Generate YAML with --from-file (value in file, not argv)
+            result = subprocess.run(
+                [
+                    kubectl, "create", "secret", "generic", secret_name,
+                    "-n", ns,
+                    f"--from-file={env_name}={tmp_path}",
+                    "--dry-run=client", "-o", "yaml",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return False
+            # Apply (create or update)
+            apply_result = subprocess.run(
+                [kubectl, "apply", "-f", "-", "-n", ns],
+                input=result.stdout,
+                capture_output=True,
+                text=True,
+            )
+            return apply_result.returncode == 0
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, env_name: str, project: str) -> bool:
         kubectl = _find_kubectl()

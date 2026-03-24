@@ -1,10 +1,18 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""CircleCI project env vars driver — uses `circleci` CLI."""
+"""CircleCI project env vars driver — uses `circleci` CLI.
+
+Security: JSON payloads containing secret values are passed via stdin
+(-d @-) and auth tokens via curl config (-K -) to avoid exposure in
+`ps aux`.
+"""
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import tempfile
 
 from .base import PlatformDriver
 
@@ -29,63 +37,62 @@ class CircleCIDriver(PlatformDriver):
 
     def exists(self, env_name: str, project: str) -> bool:
         try:
-            result = subprocess.run(
-                [_find_circleci(), "context", "list", project],
-                capture_output=True,
-                text=True,
-            )
+            _find_circleci()
         except FileNotFoundError:
             return False
-        # circleci CLI doesn't have a direct env var list command,
-        # so we use the API via curl
+        token = os.environ.get("CIRCLECI_TOKEN", "")
+        if not token:
+            return False
+        # Security: pass auth token via curl config on stdin.
         result = subprocess.run(
-            [
-                "curl", "-s",
-                "-H", "Circle-Token: $(cat ~/.circleci/cli.yml 2>/dev/null | grep token | cut -d' ' -f2)",
-                f"https://circleci.com/api/v2/project/{project}/envvar",
-            ],
+            ["curl", "-s", "-K", "-",
+             f"https://circleci.com/api/v2/project/{project}/envvar"],
+            input=f'-H "Circle-Token: {token}"\n',
             capture_output=True,
             text=True,
-            shell=False,
         )
         return env_name in result.stdout
 
     def put(self, env_name: str, value: str, project: str) -> bool:
         # CircleCI API: POST /project/:project/envvar
-        import json
-        import os
-
+        # Security: pass auth token via curl config (-K -) and JSON payload
+        # via tempfile (-d @file) to avoid exposing secrets in argv.
         token = os.environ.get("CIRCLECI_TOKEN", "")
         if not token:
             raise FileNotFoundError(
                 "CIRCLECI_TOKEN 環境変数を設定してください。"
             )
         payload = json.dumps({"name": env_name, "value": value})
-        result = subprocess.run(
-            [
-                "curl", "-s", "-X", "POST",
-                "-H", f"Circle-Token: {token}",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
-                f"https://circleci.com/api/v2/project/{project}/envvar",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0 and '"name"' in result.stdout
+        fd, tmp_path = tempfile.mkstemp(prefix="banto-circleci-", suffix=".json")
+        try:
+            os.write(fd, payload.encode("utf-8"))
+            os.close(fd)
+            os.chmod(tmp_path, 0o600)
+            config = (
+                f'-H "Circle-Token: {token}"\n'
+                f'-H "Content-Type: application/json"\n'
+            )
+            result = subprocess.run(
+                ["curl", "-s", "-X", "POST", "-K", "-",
+                 "-d", f"@{tmp_path}",
+                 f"https://circleci.com/api/v2/project/{project}/envvar"],
+                input=config,
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0 and '"name"' in result.stdout
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, env_name: str, project: str) -> bool:
-        import os
-
         token = os.environ.get("CIRCLECI_TOKEN", "")
         if not token:
             return False
+        # Security: pass auth token via curl config on stdin.
         result = subprocess.run(
-            [
-                "curl", "-s", "-X", "DELETE",
-                "-H", f"Circle-Token: {token}",
-                f"https://circleci.com/api/v2/project/{project}/envvar/{env_name}",
-            ],
+            ["curl", "-s", "-X", "DELETE", "-K", "-",
+             f"https://circleci.com/api/v2/project/{project}/envvar/{env_name}"],
+            input=f'-H "Circle-Token: {token}"\n',
             capture_output=True,
             text=True,
         )

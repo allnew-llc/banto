@@ -31,7 +31,7 @@ class TestHelpers:
         assert _history_service("banto-sync") == "banto-sync-history"
 
     def test_version_account(self):
-        assert _version_account("openai", 3) == "openai:v3"
+        assert _version_account("openai", 3) == "openai--v3"
 
 
 class TestHistoryStore:
@@ -56,7 +56,7 @@ class TestHistoryStore:
         store.record("openai", "sk-secret-123", "banto-sync")
 
         mock_kc.store.assert_called_once_with(
-            "openai:v1", "sk-secret-123",
+            "openai--v1", "sk-secret-123",
         )
 
     @patch("banto.sync.history.KeychainStore")
@@ -70,7 +70,7 @@ class TestHistoryStore:
 
         val = store.get_version_value("test", 1, "key")
         assert val == "original-value"
-        mock_kc.get.assert_called_with("test:v1")
+        mock_kc.get.assert_called_with("test--v1")
 
     @patch("banto.sync.history.KeychainStore")
     def test_get_version_nonexistent_secret(self, mock_kc_cls, tmp_path: Path):
@@ -131,8 +131,8 @@ class TestHistoryStore:
         deleted_accounts = [
             call.args[0] for call in mock_kc.delete.call_args_list
         ]
-        assert "many:v1" in deleted_accounts
-        assert "many:v5" in deleted_accounts
+        assert "many--v1" in deleted_accounts
+        assert "many--v5" in deleted_accounts
 
     @patch("banto.sync.history.KeychainStore")
     def test_remove_cleans_keychain(self, mock_kc_cls, tmp_path: Path):
@@ -146,8 +146,8 @@ class TestHistoryStore:
         deleted_accounts = [
             call.args[0] for call in mock_kc.delete.call_args_list
         ]
-        assert "x:v1" in deleted_accounts
-        assert "x:v2" in deleted_accounts
+        assert "x--v1" in deleted_accounts
+        assert "x--v2" in deleted_accounts
 
     @patch("banto.sync.history.KeychainStore")
     def test_remove_without_service(self, mock_kc_cls, tmp_path: Path):

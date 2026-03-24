@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Azure Key Vault driver — uses `az` CLI."""
+"""Azure Key Vault driver — uses `az` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `az keyvault secret set` command supports reading from stdin via --value @-.
+"""
 from __future__ import annotations
 
 import shutil
@@ -49,13 +53,16 @@ class AzureKeyVaultDriver(PlatformDriver):
         return result.returncode == 0
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass value via stdin using az's @- convention to avoid
+        # argv exposure in ps aux. The `az` CLI reads @- as "read from stdin".
         result = subprocess.run(
             [
                 _find_az(), "keyvault", "secret", "set",
                 "--vault-name", project,
                 "--name", self._normalize_name(env_name),
-                "--value", value,
+                "--value", "@-",
             ],
+            input=value,
             capture_output=True,
             text=True,
         )

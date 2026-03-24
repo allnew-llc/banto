@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Netlify env vars driver — uses `netlify` CLI."""
+"""Netlify env vars driver — uses `netlify` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `netlify env:set` command reads the value from stdin when piped.
+"""
 from __future__ import annotations
 
 import shutil
@@ -42,11 +46,14 @@ class NetlifyDriver(PlatformDriver):
         )
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass value via stdin to avoid argv exposure in ps aux.
+        # Netlify CLI reads value from stdin when piped.
         result = subprocess.run(
             [
-                _find_netlify(), "env:set", env_name, value,
+                _find_netlify(), "env:set", env_name,
                 "--site", project, "--context", "production",
             ],
+            input=value,
             capture_output=True,
             text=True,
         )

@@ -2,7 +2,7 @@
 
 # banto
 
-A budget-gated API key vault designed to limit excessive API charges caused by unexpectedly running LLM agents. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) -- not in `.env` files or environment variables -- and released only when the budget allows.
+Local-first secret management with optional budget gating and dynamic leases. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) and synced to 33 cloud platforms. Budget mode adds LLM cost control. Note: some commands (`sync run`, `sync export`) intentionally materialize secrets into environment variables or stdout for interoperability.
 
 > Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
@@ -265,9 +265,9 @@ Three layers are checked on every `get_key()` call (all must pass):
 
 - Keys are stored as generic passwords in the login keychain
 - Service name format: `banto-<provider>` (e.g., `banto-openai`)
-- Uses the macOS `security` CLI tool (no native bindings needed); account name resolved via `os.getlogin()`
-- Keys are never written to disk -- no `.env` files, no config files
-- Note: During `banto store`, the key is passed as a command-line argument to the `security` tool and is briefly visible in the process table. This is a limitation of the macOS `security` CLI.
+- Uses macOS Security framework via ctypes for store/get — secret values never appear in process arguments
+- `sync export` and `sync run` intentionally output/inject values for interoperability
+- `sync validate --keychain` sends keys to provider endpoints for health checks (opt-in only, not default)
 
 ### Budget-gated get_key()
 

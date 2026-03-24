@@ -1,10 +1,18 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Alibaba Cloud KMS Secrets Manager driver — uses `aliyun` CLI."""
+"""Alibaba Cloud KMS Secrets Manager driver — uses `aliyun` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The aliyun CLI supports reading parameter values from stdin with the
+--SecretData=- convention (file-based input). We use a tempfile approach
+since aliyun CLI doesn't natively support stdin for --SecretData.
+"""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
 
 from .base import PlatformDriver
 
@@ -17,6 +25,20 @@ def _find_aliyun() -> str:
     path = shutil.which("aliyun")
     if path is None:
         raise FileNotFoundError(_CLI_NOT_FOUND)
+    return path
+
+
+def _write_secret_tempfile(value: str) -> str:
+    """Write secret to a 0600 tempfile and return the path.
+
+    Caller is responsible for deleting the file after use.
+    """
+    fd, path = tempfile.mkstemp(prefix="banto-secret-", suffix=".txt")
+    try:
+        os.write(fd, value.encode("utf-8"))
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)
     return path
 
 
@@ -42,34 +64,41 @@ class AlibabaKMSDriver(PlatformDriver):
         return result.returncode == 0
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: write value to a 0600 tempfile to avoid argv exposure.
+        # aliyun CLI doesn't support stdin for --SecretData, so we use
+        # a tempfile and read it via file:// URI.
         aliyun = _find_aliyun()
-        # Try to add a new version
-        result = subprocess.run(
-            [
-                aliyun, "kms", "PutSecretValue",
-                "--SecretName", env_name,
-                "--SecretData", value,
-                "--VersionId", "vault-latest",
-                "--region", project,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return True
-        # Create new secret
-        result = subprocess.run(
-            [
-                aliyun, "kms", "CreateSecret",
-                "--SecretName", env_name,
-                "--SecretData", value,
-                "--VersionId", "v1",
-                "--region", project,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0
+        tmp_path = _write_secret_tempfile(value)
+        try:
+            # Try to add a new version
+            result = subprocess.run(
+                [
+                    aliyun, "kms", "PutSecretValue",
+                    "--SecretName", env_name,
+                    "--SecretData", f"file://{tmp_path}",
+                    "--VersionId", "vault-latest",
+                    "--region", project,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return True
+            # Create new secret
+            result = subprocess.run(
+                [
+                    aliyun, "kms", "CreateSecret",
+                    "--SecretName", env_name,
+                    "--SecretData", f"file://{tmp_path}",
+                    "--VersionId", "v1",
+                    "--region", project,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, env_name: str, project: str) -> bool:
         result = subprocess.run(

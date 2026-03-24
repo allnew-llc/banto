@@ -18,7 +18,7 @@ Usage:
         name="db-staging",
         ttl_seconds=3600,
         cmd="aws iam create-access-key --user-name bot --output json",
-        revoke_cmd="aws iam delete-access-key --user-name bot --access-key-id {value}",
+        revoke_cmd="aws iam delete-access-key --user-name bot --access-key-id $BANTO_LEASE_VALUE",
     )
     # info.value contains the credential
     # info.lease_id tracks it
@@ -133,8 +133,9 @@ class LeaseManager:
             cmd: Shell command to generate the credential. Its stdout
                  is captured as the credential value.
             revoke_cmd: Shell command to revoke the credential on expiry.
-                        Use {value} as placeholder for the credential and
-                        {lease_id} for the lease ID.
+                        The credential value is passed via the BANTO_LEASE_VALUE
+                        environment variable (use $BANTO_LEASE_VALUE in the command).
+                        Use {lease_id} as placeholder for the lease ID.
 
         Returns:
             LeaseInfo with the credential value and lease metadata.
@@ -223,15 +224,15 @@ class LeaseManager:
         revoke_cmd = meta.get("revoke_cmd", "")
 
         if revoke_cmd:
-            # Retrieve value for placeholder substitution
+            # Retrieve value — passed via env var, NOT expanded into argv
             value = self._kc.get(lease_id) or ""
-            expanded = revoke_cmd.replace("{value}", value).replace(
-                "{lease_id}", lease_id
-            )
+            expanded = revoke_cmd.replace("{lease_id}", lease_id)
+            env = {**os.environ, "BANTO_LEASE_VALUE": value}
             try:
                 argv = shlex.split(expanded)
                 subprocess.run(
                     argv, capture_output=True, text=True, timeout=30,
+                    env=env,
                 )
             except (subprocess.SubprocessError, OSError, ValueError):
                 pass  # Best-effort revocation

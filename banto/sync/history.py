@@ -12,7 +12,7 @@ This eliminates the need for application-layer encryption — Keychain
 
 Keychain storage scheme:
   service_prefix: "{sync_service}-history"
-  provider (account key): "{secret_name}:v{version}"
+  provider (account key): "{secret_name}--v{version}"
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _history_service(sync_service: str) -> str:
 
 def _version_account(secret_name: str, version: int) -> str:
     """Derive the Keychain account key for a specific version."""
-    return f"{secret_name}:v{version}"
+    return f"{secret_name}--v{version}"
 
 
 class HistoryStore:

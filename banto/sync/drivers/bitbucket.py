@@ -4,6 +4,10 @@
 
 Bitbucket doesn't have a dedicated secrets CLI, so we use the REST API
 via curl with BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD.
+
+Security: JSON payloads containing secret values are passed via stdin
+(-d @-) and auth credentials via curl config (-K -) to avoid exposure
+in `ps aux`.
 """
 from __future__ import annotations
 
@@ -25,6 +29,11 @@ def _auth() -> tuple[str, str]:
     return user, password
 
 
+def _curl_config_auth(user: str, password: str) -> str:
+    """Build a curl config string for authentication."""
+    return f'-u "{user}:{password}"\n'
+
+
 class BitbucketPipelinesDriver(PlatformDriver):
     """Deploy secrets to Bitbucket Pipelines repository variables.
 
@@ -43,11 +52,10 @@ class BitbucketPipelinesDriver(PlatformDriver):
             user, password = _auth()
         except FileNotFoundError:
             return False
+        # Security: pass auth via curl config on stdin to avoid argv exposure.
         result = subprocess.run(
-            [
-                "curl", "-s", "-u", f"{user}:{password}",
-                self._api_url(project),
-            ],
+            ["curl", "-s", "-K", "-", self._api_url(project)],
+            input=_curl_config_auth(user, password),
             capture_output=True,
             text=True,
         )
@@ -69,30 +77,40 @@ class BitbucketPipelinesDriver(PlatformDriver):
         })
         # Try to delete existing first (Bitbucket doesn't support update)
         self.delete(env_name, project)
-        result = subprocess.run(
-            [
-                "curl", "-s", "-X", "POST",
-                "-u", f"{user}:{password}",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
-                self._api_url(project),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0 and '"key"' in result.stdout
+        # Security: pass auth via curl config (-K -) and JSON payload via
+        # a tempfile (-d @file) to avoid exposing secrets in argv.
+        import tempfile
+
+        fd, tmp_path = tempfile.mkstemp(prefix="banto-bb-", suffix=".json")
+        try:
+            os.write(fd, payload.encode("utf-8"))
+            os.close(fd)
+            os.chmod(tmp_path, 0o600)
+            config = (
+                f'-u "{user}:{password}"\n'
+                f'-H "Content-Type: application/json"\n'
+            )
+            result = subprocess.run(
+                ["curl", "-s", "-X", "POST", "-K", "-",
+                 "-d", f"@{tmp_path}",
+                 self._api_url(project)],
+                input=config,
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0 and '"key"' in result.stdout
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, env_name: str, project: str) -> bool:
         try:
             user, password = _auth()
         except FileNotFoundError:
             return False
-        # List to find UUID
+        # Security: pass auth via curl config on stdin.
         result = subprocess.run(
-            [
-                "curl", "-s", "-u", f"{user}:{password}",
-                self._api_url(project),
-            ],
+            ["curl", "-s", "-K", "-", self._api_url(project)],
+            input=_curl_config_auth(user, password),
             capture_output=True,
             text=True,
         )
@@ -102,11 +120,9 @@ class BitbucketPipelinesDriver(PlatformDriver):
                 if v.get("key") == env_name:
                     uuid = v.get("uuid", "").strip("{}")
                     del_result = subprocess.run(
-                        [
-                            "curl", "-s", "-X", "DELETE",
-                            "-u", f"{user}:{password}",
-                            f"{self._api_url(project)}/{{{uuid}}}",
-                        ],
+                        ["curl", "-s", "-X", "DELETE", "-K", "-",
+                         f"{self._api_url(project)}/{{{uuid}}}"],
+                        input=_curl_config_auth(user, password),
                         capture_output=True,
                         text=True,
                     )
