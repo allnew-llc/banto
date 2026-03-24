@@ -124,7 +124,11 @@ def _validate_cloudflare(key: str) -> ValidationResult:
 
 
 def _validate_xai(key: str) -> ValidationResult:
-    """xAI/Grok: GET /v1/models (OpenAI-compatible endpoint)."""
+    """xAI/Grok: GET /v1/models (OpenAI-compatible endpoint).
+
+    Note: xAI returns 403 for both invalid keys AND endpoint-level
+    access restrictions. Only 401 is a definitive "invalid key" signal.
+    """
     status, body = _http_get(
         "https://api.x.ai/v1/models",
         {"Authorization": f"Bearer {key}"},
@@ -133,6 +137,12 @@ def _validate_xai(key: str) -> ValidationResult:
         return ValidationResult("xai", True, "Key valid")
     if status == 401:
         return ValidationResult("xai", False, "Invalid API key", status)
+    if status == 403:
+        return ValidationResult(
+            "xai", True,
+            "HTTP 403 (cannot verify — xAI returns 403 for both invalid keys and access restrictions)",
+            status,
+        )
     return ValidationResult("xai", False, f"HTTP {status}", status)
 
 
