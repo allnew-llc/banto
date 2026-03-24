@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.1.0 (2026-03-24)
+
+- **New: `banto sync validate`** — Test API keys against provider endpoints before pushing. Supported: OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI. Read-only health checks, no data modified. Pattern matching for Keychain service names (e.g. `claude-mcp-openai` → openai validator)
+- **New: `banto sync push --validate`** — Pre-push validation gate. Blocks push if any key is invalid. Prevents propagating broken keys to cloud targets
+- **New: fingerprint-based drift detection** — `banto sync push` now records SHA-256 fingerprint of each pushed value. `banto sync audit` compares current Keychain fingerprint against last-pushed fingerprint to detect local changes not yet synced
+- **Enhanced: `banto sync audit`** — Now checks 4 dimensions:
+  1. Existence drift (missing in Keychain or target)
+  2. Fingerprint drift (Keychain changed since last push)
+  3. Local file value mismatch (actual `.env` content vs Keychain)
+  4. Rotation staleness (`--max-age-days N`)
+
 ## 4.0.0 (2026-03-24)
 
 ### Architecture: Modular banto

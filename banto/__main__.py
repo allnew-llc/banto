@@ -65,7 +65,13 @@ _PROFILE_DESCRIPTIONS = {
 
 
 def cmd_status(args: list[str]) -> None:
-    guard = CostGuard(caller="cli")
+    vault = SecureVault(caller="cli")
+    if not vault.budget_enabled:
+        print("Budget: disabled (no monthly_limit_usd in config)")
+        print("\nEnable with: banto budget 100")
+        return
+    guard = vault._guard
+    assert guard is not None
     s = guard.get_remaining_budget()
     print(f"Month:     {s['month']}")
     print(f"Used:      ${s['used_usd']:.2f}")
@@ -181,8 +187,11 @@ def cmd_list(args: list[str]) -> None:
     providers = vault.list_providers()
     budget = vault.get_budget_status()
 
-    print(f"\nBudget: ${budget['used_usd']:.2f} / ${budget['monthly_limit_usd']:.2f} "
-          f"(${budget['remaining_usd']:.2f} remaining)\n")
+    if budget.get("budget_enabled", True):
+        print(f"\nBudget: ${budget['used_usd']:.2f} / ${budget['monthly_limit_usd']:.2f} "
+              f"(${budget['remaining_usd']:.2f} remaining)\n")
+    else:
+        print("\nBudget: disabled\n")
 
     if providers:
         print("Stored keys:")

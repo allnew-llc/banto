@@ -16,6 +16,7 @@ from . import audit
 from .config import SecretEntry, SyncConfig, Target
 from .drivers import get_driver
 from .notifiers.base import EventPayload, SyncEvent
+from .sync_state import SyncState
 
 
 @dataclass
@@ -143,6 +144,12 @@ def sync_secret(
     for target in entry.targets:
         result = _sync_one_target(entry, target, value, audit_log=audit_log)
         report.results.append(result)
+
+    # Record sync fingerprint for drift detection
+    if report.ok_count > 0:
+        state = SyncState()
+        synced_targets = [r.target_label for r in report.results if r.success]
+        state.record_push(secret_name, value, synced_targets)
 
     event = SyncEvent.SYNC_OK if report.all_ok else SyncEvent.SYNC_FAIL
     fire_notifications(config, event, report, secret_name=secret_name)
