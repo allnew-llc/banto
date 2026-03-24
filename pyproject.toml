@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "banto"
-version = "3.1.0"
-description = "Budget-gated API key vault with multi-platform sync for LLM applications on macOS"
+version = "4.0.0"
+description = "Local-first secret management with optional budget gating and dynamic leases"
 readme = "README.md"
 license = "LicenseRef-Dual"
 requires-python = ">=3.10"
 authors = [{ name = "AllNew LLC" }]
-keywords = ["llm", "api", "budget", "keychain", "macos", "security", "secrets", "sync", "vault"]
+keywords = ["llm", "api", "budget", "keychain", "macos", "security", "secrets", "sync", "vault", "lease", "dynamic-secrets"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

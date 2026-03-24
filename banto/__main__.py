@@ -398,6 +398,11 @@ def cmd_sync(args: list[str]) -> None:
     cmd_sync_dispatch(args)
 
 
+def cmd_lease(args: list[str]) -> None:
+    from .lease_cli import cmd_lease_dispatch
+    cmd_lease_dispatch(args)
+
+
 COMMANDS = {
     "status": cmd_status,
     "budget": cmd_budget,
@@ -408,6 +413,7 @@ COMMANDS = {
     "check": cmd_check,
     "init": cmd_init,
     "sync": cmd_sync,
+    "lease": cmd_lease,
 }
 
 
@@ -425,6 +431,7 @@ def main() -> None:
         print("  check <model> ...   Dry-run budget check")
         print("  init                Copy default config to ~/.config/banto/")
         print("  sync <cmd>          Multi-platform secret sync (33 platforms)")
+        print("  lease <cmd>         Dynamic secrets with TTL and auto-revoke")
         print()
         print("Budget examples:")
         print("  banto budget                          Show all limits")
