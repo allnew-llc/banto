@@ -1,5 +1,46 @@
 # Changelog
 
+## 4.0.0 (2026-03-24)
+
+### Architecture: Modular banto
+
+banto is now a **modular secret management platform**. Budget gating and dynamic leases are opt-in — the core is pure key storage + multi-platform sync.
+
+```
+banto/
+├── core     : Keychain + sync (33 platforms)  ← everyone
+├── budget   : LLM cost gating (hold/settle)   ← opt-in
+└── lease    : dynamic secrets with TTL         ← opt-in
+```
+
+### New: Optional budget mode
+
+- `SecureVault(budget=False)` — keys returned directly, no cost checks (NEW DEFAULT)
+- `SecureVault(budget=True)` — existing hold/settle behavior preserved
+- `SecureVault()` (budget=None) — auto-detects from config: enabled when `monthly_limit_usd > 0`
+- `budget_enabled` property for runtime checking
+- `record_usage()`, `get_budget_status()`, `estimate_cost()` gracefully no-op when budget disabled
+- `set_budget()` lazily initializes the budget subsystem
+
+### New: `banto lease` — dynamic secrets with TTL
+
+- `banto lease acquire <name> --cmd '<generate>' [--revoke-cmd '<revoke>'] [--ttl 3600]`
+  - Generate short-lived credentials via external commands
+  - Store temporarily in Keychain, auto-revoke on TTL expiry
+  - `{value}` and `{lease_id}` placeholders in revoke commands
+- `banto lease get <lease_id>` — retrieve credential (stdout, for piping)
+- `banto lease revoke <lease_id>` — explicit revocation
+- `banto lease list` — show active leases with remaining TTL
+- `banto lease cleanup` — revoke all expired leases
+- Lease state tracked in `~/.config/banto/lease-state.json` (no values stored — values stay in Keychain)
+
+### Breaking Changes
+
+- `SecureVault` default behavior changed: `budget=None` (auto-detect) instead of always-on budget
+- Users with `monthly_limit_usd > 0` in config.json: **no change** (auto-detected as budget=True)
+- Users without config.json: `get_key(provider="openai")` now works without budget setup
+- Description changed: "Budget-gated API key vault" → "Local-first secret management"
+
 ## 3.1.0 (2026-03-24)
 
 - **New: `banto sync rotate`** — Rotate a secret interactively or via `--from-cli '<command>'`. Updates Keychain, records version history, re-syncs all targets
