@@ -648,30 +648,53 @@ def cmd_sync_validate(args: list[str]) -> None:
             import re
             svce_re = re.compile(r'"svce"<blob>="([^"]*)"')
             acct_re = re.compile(r'"acct"<blob>="([^"]*)"')
-            current_service = ""
+
+            # Collect all service+account pairs from keychain dump
+            entries_found: list[tuple[str, str]] = []
+            current_attrs: dict[str, str] = {}
             for line in result.stdout.splitlines():
-                m = svce_re.search(line)
-                if m:
-                    current_service = m.group(1)
+                stripped = line.strip()
+                if stripped.startswith("class:"):
+                    if "svce" in current_attrs:
+                        entries_found.append((
+                            current_attrs.get("svce", ""),
+                            current_attrs.get("acct", ""),
+                        ))
+                    current_attrs = {}
                     continue
-                m = acct_re.search(line)
-                if m and current_service:
-                    # Check if this service matches any known provider
-                    svc_lower = current_service.lower()
-                    for pattern in SERVICE_PATTERNS:
-                        if pattern in svc_lower:
-                            try:
-                                val = sp.run(
-                                    ["security", "find-generic-password",
-                                     "-s", current_service, "-a", m.group(1), "-w"],
-                                    capture_output=True, text=True,
-                                ).stdout.strip()
-                                if val:
-                                    keys_to_test.append((current_service, val))
-                            except Exception:
-                                pass
-                            break
-                    current_service = ""
+                m = svce_re.search(stripped)
+                if m:
+                    current_attrs["svce"] = m.group(1)
+                m = acct_re.search(stripped)
+                if m:
+                    current_attrs["acct"] = m.group(1)
+            # Don't forget last entry
+            if "svce" in current_attrs:
+                entries_found.append((
+                    current_attrs.get("svce", ""),
+                    current_attrs.get("acct", ""),
+                ))
+
+            # Filter for known provider patterns and retrieve values
+            seen: set[str] = set()
+            for svc, acct in entries_found:
+                if not svc or svc in seen:
+                    continue
+                svc_lower = svc.lower()
+                for pattern in SERVICE_PATTERNS:
+                    if pattern in svc_lower:
+                        seen.add(svc)
+                        try:
+                            val = sp.run(
+                                ["security", "find-generic-password",
+                                 "-s", svc, "-w"],
+                                capture_output=True, text=True,
+                            ).stdout.strip()
+                            if val:
+                                keys_to_test.append((svc, val))
+                        except Exception:
+                            pass
+                        break
     else:
         # Use sync.json secrets
         kc = KeychainStore(service_prefix=config.keychain_service)
