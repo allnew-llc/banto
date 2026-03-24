@@ -18,6 +18,14 @@ from pathlib import Path
 from ..keychain import KeychainStore
 from .config import SyncConfig, SecretEntry, Target, DEFAULT_CONFIG_PATH
 from .history import HistoryStore
+
+
+def _is_json(args: list[str]) -> bool:
+    return "--json" in args
+
+
+def _json_out(data: dict | list) -> None:
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
 from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
 
 
@@ -44,7 +52,20 @@ def _load_config(args: list[str]) -> tuple[SyncConfig, Path]:
 def cmd_sync_status(args: list[str]) -> None:
     config, _ = _load_config(args)
     if not config.secrets:
+        if _is_json(args):
+            _json_out({"secrets": [], "count": 0})
+            return
         print("BANTO SYNC — No secrets configured.")
+        return
+
+    if _is_json(args):
+        entries = check_status(config)
+        _json_out([
+            {"name": e.secret_name, "env_name": e.env_name,
+             "keychain": e.keychain_exists,
+             "targets": {k: v for k, v in e.target_status.items()}}
+            for e in entries
+        ])
         return
 
     entries = check_status(config)
@@ -137,6 +158,16 @@ def cmd_sync_push(args: list[str]) -> None:
         report = sync_secret(config, name)
     else:
         report = sync_all(config)
+
+    if _is_json(args):
+        _json_out({"ok": report.all_ok, "ok_count": report.ok_count,
+                    "fail_count": report.fail_count,
+                    "results": [{"name": r.secret_name, "target": r.target_label,
+                                 "success": r.success, "message": r.message}
+                                for r in report.results]})
+        if not report.all_ok:
+            sys.exit(1)
+        return
 
     _print_report(report)
     if not report.all_ok:
@@ -310,6 +341,12 @@ def cmd_sync_audit(args: list[str]) -> None:
                 issues.append(f"  STALE   {name}: unparseable timestamp in history")
 
     # Output
+    if _is_json(args):
+        _json_out({"ok": len(issues) == 0, "issues": issues, "info": info})
+        if issues:
+            sys.exit(1)
+        return
+
     if info:
         print("BANTO SYNC AUDIT\n")
         for line in info:
@@ -723,21 +760,38 @@ def cmd_sync_validate(args: list[str]) -> None:
         print("\nNo keys were sent to provider endpoints.")
         return
 
-    print(f"\nBANTO SYNC VALIDATE — Testing {len(keys_to_test)} key(s)\n")
-
+    results_data: list[dict] = []
     all_valid = True
+
+    if not _is_json(args):
+        print(f"\nBANTO SYNC VALIDATE — Testing {len(keys_to_test)} key(s)\n")
+
     for name, value in keys_to_test:
         if not value:
-            print(f"  SKIP  {name}: no value")
+            results_data.append({"name": name, "status": "skip", "message": "no value"})
+            if not _is_json(args):
+                print(f"  SKIP  {name}: no value")
             continue
         result = validate_key(name, value)
-        if result.status == "pass":
-            print(f"  PASS    {name}: {result.message}")
-        elif result.status == "fail":
-            print(f"  FAIL    {name}: {result.message}")
+        results_data.append({
+            "name": name, "provider": result.provider,
+            "status": result.status, "message": result.message,
+        })
+        if result.status == "fail":
             all_valid = False
-        else:
-            print(f"  UNKNOWN {name}: {result.message}")
+        if not _is_json(args):
+            if result.status == "pass":
+                print(f"  PASS    {name}: {result.message}")
+            elif result.status == "fail":
+                print(f"  FAIL    {name}: {result.message}")
+            else:
+                print(f"  UNKNOWN {name}: {result.message}")
+
+    if _is_json(args):
+        _json_out({"ok": all_valid, "results": results_data})
+        if not all_valid:
+            sys.exit(1)
+        return
 
     print()
     if not all_valid:

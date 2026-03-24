@@ -13,11 +13,22 @@ Commands:
 """
 
 import getpass
+import json
 import shutil
 import sys
 from pathlib import Path
 
 from .guard import CostGuard, CONFIG_DIR
+
+
+def _is_json(args: list[str]) -> bool:
+    """Check if --json flag is present."""
+    return "--json" in args
+
+
+def _json_out(data: dict | list) -> None:
+    """Print JSON to stdout and exit."""
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
 from .keychain import KeychainStore, _validate_provider
 from .profiles import ProfileManager
 from .vault import SecureVault
@@ -68,11 +79,19 @@ _PROFILE_DESCRIPTIONS = {
 def cmd_status(args: list[str]) -> None:
     vault = SecureVault(caller="cli")
     if not vault.budget_enabled:
+        if _is_json(args):
+            _json_out({"budget_enabled": False})
+            return
         print("Budget: disabled (no monthly_limit_usd in config)")
         print("\nEnable with: banto budget 100")
         return
     guard = vault._guard
     assert guard is not None
+    if _is_json(args):
+        s = guard.get_remaining_budget()
+        s["recommended_profile"] = guard.recommend_profile()
+        _json_out(s)
+        return
     s = guard.get_remaining_budget()
     print(f"Month:     {s['month']}")
     print(f"Used:      ${s['used_usd']:.2f}")
@@ -188,6 +207,10 @@ def cmd_list(args: list[str]) -> None:
     providers = vault.list_providers()
     budget = vault.get_budget_status()
 
+    if _is_json(args):
+        _json_out({"providers": providers, "budget": budget})
+        return
+
     if budget.get("budget_enabled", True):
         print(f"\nBudget: ${budget['used_usd']:.2f} / ${budget['monthly_limit_usd']:.2f} "
               f"(${budget['remaining_usd']:.2f} remaining)\n")
@@ -237,6 +260,8 @@ def cmd_check(args: list[str]) -> None:
         elif args[i] == "--size" and i + 1 < len(args):
             kwargs["size"] = args[i + 1]
             i += 2
+        elif args[i] == "--json":
+            i += 1
         else:
             print(f"Unknown option: {args[i]}", file=sys.stderr)
             sys.exit(1)
@@ -244,6 +269,12 @@ def cmd_check(args: list[str]) -> None:
     guard = CostGuard(caller="cli")
     cost = guard.estimate_cost(model=model, **kwargs)
     budget = guard.get_remaining_budget()
+    allowed = cost <= budget["remaining_usd"]
+
+    if _is_json(args):
+        _json_out({"model": model, "estimated_usd": cost,
+                    "remaining_usd": budget["remaining_usd"], "allowed": allowed})
+        return
 
     print(f"Model:     {model}")
     print(f"Estimated: ${cost:.4f}")
@@ -259,7 +290,11 @@ def cmd_profile(args: list[str]) -> None:
     vault = SecureVault(caller="cli")
     profiles = vault.get_profiles()
 
-    if not args:
+    if _is_json(args):
+        _json_out(profiles)
+        return
+
+    if not args or (len(args) == 1 and args[0] == "--json"):
         # Show all profiles
         print("Model profiles:\n")
         for name, info in profiles.items():
