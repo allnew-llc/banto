@@ -153,7 +153,10 @@ class SyncConfig:
         config_path = path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
             return cls()
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError, OSError):
+            return cls()
         if not isinstance(raw, dict):
             return cls()
         secrets: dict[str, SecretEntry] = {}
