@@ -627,17 +627,23 @@ def cmd_sync_validate(args: list[str]) -> None:
     """Validate API keys against provider endpoints.
 
     If sync.json has secrets, validates those.
-    With --keychain flag (or no sync.json secrets), scans Keychain directly
-    for known provider patterns.
+    With --keychain flag, scans Keychain directly for known provider patterns.
+    With --dry-run, shows which keys would be tested without sending them.
     """
     from .validate import validate_key, list_supported_providers, SERVICE_PATTERNS, should_exclude
 
     config, _ = _load_config(args)
-    scan_keychain = "--keychain" in args or not config.secrets
+    scan_keychain = "--keychain" in args
+    dry_run = "--dry-run" in args
 
     keys_to_test: list[tuple[str, str]] = []  # (name, value)
 
+    if not config.secrets and not scan_keychain:
+        print("No secrets in sync.json. Use --keychain to scan Keychain.")
+        return
+
     if scan_keychain:
+        print("Warning: Scanning Keychain and sending keys to provider validation endpoints...")
         # Scan Keychain for known API key patterns
         import subprocess as sp
         result = sp.run(
@@ -708,6 +714,13 @@ def cmd_sync_validate(args: list[str]) -> None:
     if not keys_to_test:
         print("No keys found to validate.")
         print(f"  Supported providers: {', '.join(list_supported_providers())}")
+        return
+
+    if dry_run:
+        print(f"\nBANTO SYNC VALIDATE — Dry run: {len(keys_to_test)} key(s) would be tested\n")
+        for name, _value in keys_to_test:
+            print(f"  WOULD TEST  {name}")
+        print("\nNo keys were sent to provider endpoints.")
         return
 
     print(f"\nBANTO SYNC VALIDATE — Testing {len(keys_to_test)} key(s)\n")

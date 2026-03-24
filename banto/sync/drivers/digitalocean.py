@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""DigitalOcean App Platform driver — uses `doctl` CLI."""
+"""DigitalOcean App Platform driver — uses `doctl` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `doctl apps update-env-vars` command reads KEY=VALUE from stdin.
+"""
 from __future__ import annotations
 
 import json
@@ -48,11 +52,12 @@ class DigitalOceanDriver(PlatformDriver):
             return False
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass KEY=VALUE via stdin to avoid argv exposure in ps aux.
         result = subprocess.run(
             [
                 _find_doctl(), "apps", "update-env-vars", project,
-                f"{env_name}={value}",
             ],
+            input=f"{env_name}={value}",
             capture_output=True,
             text=True,
         )

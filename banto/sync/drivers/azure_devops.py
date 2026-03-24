@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Azure DevOps Pipeline variables driver — uses `az devops` CLI."""
+"""Azure DevOps Pipeline variables driver — uses `az devops` CLI.
+
+Security: secret values are passed via stdin using az CLI's @- convention
+to avoid exposure in `ps aux`.
+"""
 from __future__ import annotations
 
 import shutil
@@ -47,17 +51,20 @@ class AzureDevOpsDriver(PlatformDriver):
         return f'"{env_name}"' in result.stdout
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass value via stdin using az CLI's @- convention
+        # to avoid argv exposure in ps aux.
         az = _find_az()
         org, proj = project.split("/", 1) if "/" in project else (project, "")
         # Try update first
         result = subprocess.run(
             [
                 az, "pipelines", "variable", "update",
-                "--name", env_name, "--value", value,
+                "--name", env_name, "--value", "@-",
                 "--secret", "true",
                 "--org", f"https://dev.azure.com/{org}",
                 "--project", proj,
             ],
+            input=value,
             capture_output=True,
             text=True,
         )
@@ -67,11 +74,12 @@ class AzureDevOpsDriver(PlatformDriver):
         result = subprocess.run(
             [
                 az, "pipelines", "variable", "create",
-                "--name", env_name, "--value", value,
+                "--name", env_name, "--value", "@-",
                 "--secret", "true",
                 "--org", f"https://dev.azure.com/{org}",
                 "--project", proj,
             ],
+            input=value,
             capture_output=True,
             text=True,
         )

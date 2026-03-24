@@ -133,13 +133,16 @@ class TestLeaseManager:
         mgr = LeaseManager(state_path=tmp_path / "state.json")
         info = mgr.acquire(
             name="db", ttl_seconds=3600, cmd="echo cred",
-            revoke_cmd="delete-key {value}",
+            revoke_cmd="delete-key $BANTO_LEASE_VALUE",
         )
         mgr.revoke(info.lease_id)
 
         # Second subprocess.run call should be the revoke command
         revoke_call = mock_run.call_args_list[-1]
         assert "delete-key" in str(revoke_call)
+        # Value must be passed via env, NOT expanded into argv
+        revoke_env = revoke_call.kwargs.get("env", {})
+        assert revoke_env.get("BANTO_LEASE_VALUE") == "key-abc"
 
     def test_revoke_nonexistent(self, tmp_path: Path):
         with patch("banto.lease.KeychainStore"):

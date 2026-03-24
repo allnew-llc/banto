@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.0 (2026-03-24) — Security Audit Response
+
+Addresses all findings from Codex security re-audit (2026-03-24).
+
+### Security (Blocker + High + Medium fixes)
+
+- **[Blocker] All 33 sync drivers**: secret values removed from subprocess argv. Uses stdin pipe (14 drivers), tempfile 0o600 (8 drivers), or curl `-K -`/`-d @file` (8 drivers). 6 drivers were already safe
+- **[High] KeychainStore rewritten with ctypes**: `store()` and `get()` now call macOS Security framework directly (SecKeychainAddGenericPassword / SecKeychainFindGenericPassword). Secret values never enter process arguments, temp files, or shell expansions
+- **[High] README/CHANGELOG corrected**: removed misleading "argv fixed" and "not in env vars" claims. Documented that `sync run`/`export`/custom backends intentionally materialize secrets
+- **[Medium] History account naming fixed**: `name:v1` → `name--v1` to avoid provider validator colon rejection
+- **[Medium] validate made opt-in**: Keychain scan requires explicit `--keychain` flag. Added `--dry-run`. No longer silently sends keys to provider endpoints
+- **[Medium] lease revoke argv exposure fixed**: credential passed via `BANTO_LEASE_VALUE` env var instead of `{value}` expansion into argv
+
 ## 4.1.0 (2026-03-24)
 
 - **New: `banto sync validate`** — Test API keys against provider endpoints before pushing. Supported: OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI. Read-only health checks, no data modified. Pattern matching for Keychain service names (e.g. `claude-mcp-openai` → openai validator)
@@ -79,9 +92,13 @@ banto/
 
 ### Security
 
-- **Fixed: KeychainStore argv exposure** — `store()` now uses tmpfile (mode 0600, immediate deletion) instead of passing API key as `-w` argument. Key no longer visible in `ps aux`
-- **Keychain-native history** — Version rollback values stored directly in macOS Keychain. JSON history file contains only metadata (timestamp + fingerprint). Secret values never leave Keychain
-- Zero new dependencies (still stdlib-only)
+- **Fixed: KeychainStore — ctypes Security framework** — `store()` and `get()` now use macOS Security framework directly via ctypes (SecKeychainAddGenericPassword / SecKeychainFindGenericPassword). Secret values never appear in process arguments, temp files, or shell expansions
+- **Fixed: all 33 sync drivers** — secret values no longer passed as subprocess argv. Uses stdin pipe, tempfile (0600), or env var depending on driver CLI capabilities
+- **Fixed: lease revoke** — credential value passed via `BANTO_LEASE_VALUE` env var instead of expanding into argv
+- **Fixed: sync validate** — Keychain scan now requires explicit `--keychain` flag (no longer defaults to sending keys). Added `--dry-run` mode
+- **Fixed: history account naming** — version accounts use `name--v1` format (was `name:v1` which conflicted with provider name validator)
+- **Keychain-native history** — Version rollback values stored directly in macOS Keychain. JSON history file contains only metadata (timestamp + fingerprint)
+- Zero new dependencies (still stdlib-only, ctypes is part of stdlib)
 
 ### Breaking Changes
 

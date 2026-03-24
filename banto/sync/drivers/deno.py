@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Deno Deploy env vars driver — uses `deployctl` CLI."""
+"""Deno Deploy env vars driver — uses `deployctl` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `deployctl env set` command reads KEY=VALUE from stdin when piped.
+"""
 from __future__ import annotations
 
 import shutil
@@ -45,12 +49,13 @@ class DenoDeployDriver(PlatformDriver):
         )
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass KEY=VALUE via stdin to avoid argv exposure in ps aux.
         result = subprocess.run(
             [
                 _find_deployctl(), "env", "set",
-                f"{env_name}={value}",
                 "--project", project,
             ],
+            input=f"{env_name}={value}",
             capture_output=True,
             text=True,
         )

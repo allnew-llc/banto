@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Fly.io secrets driver — uses `fly` CLI."""
+"""Fly.io secrets driver — uses `fly` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `fly secrets set` command reads KEY=VALUE pairs from stdin.
+"""
 from __future__ import annotations
 
 import shutil
@@ -40,11 +44,14 @@ class FlyIODriver(PlatformDriver):
         )
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass KEY=VALUE via stdin to avoid argv exposure in ps aux.
+        # `fly secrets set` reads from stdin when piped.
         result = subprocess.run(
             [
                 _find_fly(), "secrets", "set",
-                f"{env_name}={value}", "-a", project, "--stage",
+                "-a", project, "--stage",
             ],
+            input=f"{env_name}={value}",
             capture_output=True,
             text=True,
         )

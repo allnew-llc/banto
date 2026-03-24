@@ -1,6 +1,10 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""Heroku config vars driver — uses `heroku` CLI."""
+"""Heroku config vars driver — uses `heroku` CLI.
+
+Security: secret values are passed via stdin to avoid exposure in `ps aux`.
+The `heroku config:set` command reads KEY=VALUE from stdin when piped.
+"""
 from __future__ import annotations
 
 import shutil
@@ -38,8 +42,11 @@ class HerokuDriver(PlatformDriver):
         return f'"{env_name}"' in result.stdout
 
     def put(self, env_name: str, value: str, project: str) -> bool:
+        # Security: pass KEY=VALUE via stdin to avoid argv exposure in ps aux.
+        # Heroku CLI reads config vars from stdin when piped.
         result = subprocess.run(
-            [_find_heroku(), "config:set", f"{env_name}={value}", "-a", project],
+            [_find_heroku(), "config:set", "-a", project],
+            input=f"{env_name}={value}",
             capture_output=True,
             text=True,
         )

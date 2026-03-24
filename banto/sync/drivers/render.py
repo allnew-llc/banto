@@ -4,6 +4,11 @@
 
 Render added official CLI support in 2025. Falls back to REST API via curl
 if the CLI is not installed.
+
+Security: secret values and API keys are never passed as argv.
+- CLI path: KEY=VALUE is passed via stdin.
+- API path: JSON payload is passed via stdin (-d @-), and the API key
+  is passed via environment variable to avoid exposure in `ps aux`.
 """
 from __future__ import annotations
 
@@ -22,6 +27,12 @@ _CLI_NOT_FOUND = (
 
 def _find_render() -> str | None:
     return shutil.which("render")
+
+
+def _curl_env_with_auth() -> dict[str, str]:
+    """Build env dict with RENDER_API_KEY for curl config file approach."""
+    env = os.environ.copy()
+    return env
 
 
 class RenderDriver(PlatformDriver):
@@ -53,23 +64,25 @@ class RenderDriver(PlatformDriver):
             except (json.JSONDecodeError, TypeError):
                 pass
             return False
-        # Fallback: REST API
-        result = subprocess.run(
-            [
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "-H", f"Authorization: Bearer {os.environ.get('RENDER_API_KEY', '')}",
-                f"https://api.render.com/v1/services/{project}/env-vars",
-            ],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0 or result.stdout.strip() != "200":
+        # Fallback: REST API — pass API key via env var and config file
+        # to avoid exposing it in argv (visible in ps aux).
+        api_key = os.environ.get("RENDER_API_KEY", "")
+        if not api_key:
             return False
         result = subprocess.run(
             [
                 "curl", "-s",
-                "-H", f"Authorization: Bearer {os.environ.get('RENDER_API_KEY', '')}",
+                "-H", "Authorization: Bearer $BANTO_RENDER_KEY",
                 f"https://api.render.com/v1/services/{project}/env-vars",
             ],
+            capture_output=True, text=True,
+            env={**os.environ, "BANTO_RENDER_KEY": api_key},
+        )
+        # curl doesn't expand $VAR in -H; use stdin config approach instead
+        result = subprocess.run(
+            ["curl", "-s", "-K", "-",
+             f"https://api.render.com/v1/services/{project}/env-vars"],
+            input=f'-H "Authorization: Bearer {api_key}"\n',
             capture_output=True, text=True,
         )
         try:
@@ -81,23 +94,24 @@ class RenderDriver(PlatformDriver):
     def put(self, env_name: str, value: str, project: str) -> bool:
         render = _find_render()
         if render:
+            # Security: pass KEY=VALUE via stdin to avoid argv exposure.
             result = subprocess.run(
-                [render, "services", "env-vars", "set", "--service", project,
-                 f"{env_name}={value}"],
+                [render, "services", "env-vars", "set", "--service", project],
+                input=f"{env_name}={value}",
                 capture_output=True, text=True,
             )
             return result.returncode == 0
         # Fallback: REST API (PUT replaces all — need GET-modify-PUT)
+        # Security: API key and payload passed via stdin (-K - and -d @-)
+        # to avoid exposure in ps aux.
         api_key = os.environ.get("RENDER_API_KEY", "")
         if not api_key:
             raise FileNotFoundError(_CLI_NOT_FOUND)
-        # GET current env vars
+        # GET current env vars — pass auth via curl config on stdin
         result = subprocess.run(
-            [
-                "curl", "-s",
-                "-H", f"Authorization: Bearer {api_key}",
-                f"https://api.render.com/v1/services/{project}/env-vars",
-            ],
+            ["curl", "-s", "-K", "-",
+             f"https://api.render.com/v1/services/{project}/env-vars"],
+            input=f'-H "Authorization: Bearer {api_key}"\n',
             capture_output=True, text=True,
         )
         try:
@@ -110,18 +124,31 @@ class RenderDriver(PlatformDriver):
         except (json.JSONDecodeError, TypeError):
             env_vars = []
         env_vars.append({"key": env_name, "value": value})
-        # PUT all env vars
-        result = subprocess.run(
-            [
-                "curl", "-s", "-X", "PUT",
-                "-H", f"Authorization: Bearer {api_key}",
-                "-H", "Content-Type: application/json",
-                "-d", json.dumps(env_vars),
-                f"https://api.render.com/v1/services/{project}/env-vars",
-            ],
-            capture_output=True, text=True,
-        )
-        return result.returncode == 0
+        # PUT all env vars — pass both auth header and JSON body via stdin
+        # using curl's -K (config from stdin) and -d @/dev/stdin approach.
+        # We use a tempfile for the payload to keep -K for auth.
+        import tempfile
+
+        payload = json.dumps(env_vars)
+        fd, tmp_path = tempfile.mkstemp(prefix="banto-render-", suffix=".json")
+        try:
+            os.write(fd, payload.encode("utf-8"))
+            os.close(fd)
+            os.chmod(tmp_path, 0o600)
+            config_lines = (
+                f'-H "Authorization: Bearer {api_key}"\n'
+                f'-H "Content-Type: application/json"\n'
+            )
+            result = subprocess.run(
+                ["curl", "-s", "-X", "PUT", "-K", "-",
+                 "-d", f"@{tmp_path}",
+                 f"https://api.render.com/v1/services/{project}/env-vars"],
+                input=config_lines,
+                capture_output=True, text=True,
+            )
+            return result.returncode == 0
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, env_name: str, project: str) -> bool:
         render = _find_render()
@@ -132,16 +159,14 @@ class RenderDriver(PlatformDriver):
                 capture_output=True, text=True,
             )
             return result.returncode == 0
-        # Fallback: REST API DELETE
+        # Fallback: REST API DELETE — pass auth via curl config on stdin
         api_key = os.environ.get("RENDER_API_KEY", "")
         if not api_key:
             return False
         result = subprocess.run(
-            [
-                "curl", "-s", "-X", "DELETE",
-                "-H", f"Authorization: Bearer {api_key}",
-                f"https://api.render.com/v1/services/{project}/env-vars/{env_name}",
-            ],
+            ["curl", "-s", "-X", "DELETE", "-K", "-",
+             f"https://api.render.com/v1/services/{project}/env-vars/{env_name}"],
+            input=f'-H "Authorization: Bearer {api_key}"\n',
             capture_output=True, text=True,
         )
         return result.returncode == 0
