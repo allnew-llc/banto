@@ -21,10 +21,16 @@ from dataclasses import dataclass
 
 @dataclass
 class ValidationResult:
-    """Result of a key validation check."""
+    """Result of a key validation check.
+
+    status: "pass" (confirmed valid), "fail" (confirmed invalid),
+            "unknown" (cannot determine — 403, timeout, no validator, etc.)
+    valid: kept for backward compat — True for pass/unknown, False for fail.
+    """
 
     provider: str
     valid: bool
+    status: str = "pass"  # "pass", "fail", "unknown"
     message: str = ""
     status_code: int = 0
 
@@ -48,12 +54,14 @@ def _validate_openai(key: str) -> ValidationResult:
         {"Authorization": f"Bearer {key}"},
     )
     if status == 200:
-        return ValidationResult("openai", True, "Key valid")
+        return ValidationResult("openai", True, "pass", "Key valid")
     if status == 401:
-        return ValidationResult("openai", False, "Invalid API key", status)
+        return ValidationResult("openai", False, "fail", "Invalid API key", status)
     if status == 429:
-        return ValidationResult("openai", True, "Rate limited but key accepted", status)
-    return ValidationResult("openai", False, f"HTTP {status}", status)
+        return ValidationResult("openai", True, "pass", "Rate limited but key accepted", status)
+    if status == 0:
+        return ValidationResult("openai", True, "unknown", "Connection failed", status)
+    return ValidationResult("openai", True, "unknown", f"HTTP {status}", status)
 
 
 def _validate_anthropic(key: str) -> ValidationResult:
@@ -66,12 +74,14 @@ def _validate_anthropic(key: str) -> ValidationResult:
         },
     )
     if status == 200:
-        return ValidationResult("anthropic", True, "Key valid")
+        return ValidationResult("anthropic", True, "pass", "Key valid")
     if status == 401:
-        return ValidationResult("anthropic", False, "Invalid API key", status)
+        return ValidationResult("anthropic", False, "fail", "Invalid API key", status)
     if status == 429:
-        return ValidationResult("anthropic", True, "Rate limited but key accepted", status)
-    return ValidationResult("anthropic", False, f"HTTP {status}", status)
+        return ValidationResult("anthropic", True, "pass", "Rate limited but key accepted", status)
+    if status == 0:
+        return ValidationResult("anthropic", True, "unknown", "Connection failed", status)
+    return ValidationResult("anthropic", True, "unknown", f"HTTP {status}", status)
 
 
 def _validate_gemini(key: str) -> ValidationResult:
@@ -81,10 +91,12 @@ def _validate_gemini(key: str) -> ValidationResult:
         {},
     )
     if status == 200:
-        return ValidationResult("gemini", True, "Key valid")
-    if status == 400 or status == 403:
-        return ValidationResult("gemini", False, "Invalid API key", status)
-    return ValidationResult("gemini", False, f"HTTP {status}", status)
+        return ValidationResult("gemini", True, "pass", "Key valid")
+    if status in (400, 403):
+        return ValidationResult("gemini", False, "fail", "Invalid API key", status)
+    if status == 0:
+        return ValidationResult("gemini", True, "unknown", "Connection failed", status)
+    return ValidationResult("gemini", True, "unknown", f"HTTP {status}", status)
 
 
 def _validate_github(key: str) -> ValidationResult:
@@ -98,10 +110,12 @@ def _validate_github(key: str) -> ValidationResult:
         },
     )
     if status == 200:
-        return ValidationResult("github", True, "Token valid")
+        return ValidationResult("github", True, "pass", "Token valid")
     if status == 401:
-        return ValidationResult("github", False, "Invalid token", status)
-    return ValidationResult("github", False, f"HTTP {status}", status)
+        return ValidationResult("github", False, "fail", "Invalid token", status)
+    if status == 0:
+        return ValidationResult("github", True, "unknown", "Connection failed", status)
+    return ValidationResult("github", True, "unknown", f"HTTP {status}", status)
 
 
 def _validate_cloudflare(key: str) -> ValidationResult:
@@ -114,13 +128,15 @@ def _validate_cloudflare(key: str) -> ValidationResult:
         try:
             data = json.loads(body)
             if data.get("success"):
-                return ValidationResult("cloudflare", True, "Token valid")
+                return ValidationResult("cloudflare", True, "pass", "Token valid")
         except json.JSONDecodeError:
             pass
-        return ValidationResult("cloudflare", True, "HTTP 200")
+        return ValidationResult("cloudflare", True, "pass", "HTTP 200")
     if status == 401:
-        return ValidationResult("cloudflare", False, "Invalid token", status)
-    return ValidationResult("cloudflare", False, f"HTTP {status}", status)
+        return ValidationResult("cloudflare", False, "fail", "Invalid token", status)
+    if status == 0:
+        return ValidationResult("cloudflare", True, "unknown", "Connection failed", status)
+    return ValidationResult("cloudflare", True, "unknown", f"HTTP {status}", status)
 
 
 def _validate_xai(key: str) -> ValidationResult:
@@ -134,16 +150,18 @@ def _validate_xai(key: str) -> ValidationResult:
         {"Authorization": f"Bearer {key}"},
     )
     if status == 200:
-        return ValidationResult("xai", True, "Key valid")
+        return ValidationResult("xai", True, "pass", "Key valid")
     if status == 401:
-        return ValidationResult("xai", False, "Invalid API key", status)
+        return ValidationResult("xai", False, "fail", "Invalid API key", status)
     if status == 403:
         return ValidationResult(
-            "xai", True,
-            "HTTP 403 (cannot verify — xAI returns 403 for both invalid keys and access restrictions)",
+            "xai", True, "unknown",
+            "Cannot verify — xAI returns 403 for both invalid keys and access restrictions",
             status,
         )
-    return ValidationResult("xai", False, f"HTTP {status}", status)
+    if status == 0:
+        return ValidationResult("xai", True, "unknown", "Connection failed", status)
+    return ValidationResult("xai", True, "unknown", f"HTTP {status}", status)
 
 
 # Registry of known validators
@@ -228,7 +246,7 @@ def validate_key(provider: str, value: str) -> ValidationResult:
         if pattern in provider_lower:
             return VALIDATORS[name](value)
 
-    return ValidationResult(provider, True, "No validator available (assumed valid)")
+    return ValidationResult(provider, True, "unknown", "No validator available for this provider")
 
 
 def list_supported_providers() -> list[str]:
