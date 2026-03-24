@@ -21,6 +21,7 @@ Launch:
 """
 from __future__ import annotations
 
+import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
@@ -580,12 +581,20 @@ def main() -> None:
         else:
             i += 1
 
+    # Capability URL: if BANTO_MCP_PATH_TOKEN is set, use a secret path
+    # instead of the default /mcp. This makes the URL itself the credential.
+    path_token = os.environ.get("BANTO_MCP_PATH_TOKEN", "")
+    mcp_path = f"/mcp-{path_token}" if path_token else "/mcp"
+
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport == "sse":
         mcp.run(transport="sse", sse_path="/sse", port=port)
     elif transport == "http":
-        mcp.run(transport="streamable-http", path="/mcp", port=port)
+        mcp.run(transport="streamable-http", path=mcp_path, port=port)
+        if path_token:
+            print(f"MCP endpoint: http://127.0.0.1:{port}{mcp_path}",
+                  file=sys.stderr)
     else:
         print(f"Unknown transport: {transport}", file=sys.stderr)
         print("Supported: stdio, sse, http", file=sys.stderr)

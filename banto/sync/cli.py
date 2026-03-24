@@ -243,7 +243,10 @@ def cmd_sync_add(args: list[str]) -> None:
 
     # Record history
     history = HistoryStore()
-    history.record(name, value, config.keychain_service)
+    ver = history.record(name, value, config.keychain_service)
+    if ver is None:
+        print("Warning: Failed to record version history (Keychain write failed).",
+              file=sys.stderr)
 
     print(f"Added '{name}' ({env_name}) with {len(parsed_targets)} target(s).")
 
@@ -541,6 +544,10 @@ def cmd_sync_rotate(args: list[str]) -> None:
     # Record history
     history = HistoryStore()
     new_ver = history.record(name, value, config.keychain_service)
+    if new_ver is None:
+        print("Error: Failed to record version history (Keychain write failed).",
+              file=sys.stderr)
+        sys.exit(1)
     print(f"Rotated '{name}' (now v{new_ver.version})")
 
     # Re-sync
@@ -653,7 +660,9 @@ def cmd_sync_import(args: list[str]) -> None:
 
         entry = SecretEntry(name=name, account=name, env_name=env_var)
         config.add_secret(entry)
-        history.record(name, value, config.keychain_service)
+        ver = history.record(name, value, config.keychain_service)
+        if ver is None:
+            print(f"  Warning: Failed to record history for {name}", file=sys.stderr)
         count += 1
 
     config.save(config_path)

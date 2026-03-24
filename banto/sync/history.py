@@ -133,21 +133,25 @@ class HistoryStore:
 
     def record(
         self, secret_name: str, value: str, sync_service: str,
-    ) -> SecretVersion:
+    ) -> SecretVersion | None:
         """Record a new version of a secret.
 
         Stores the value in Keychain and metadata in the JSON file.
+        Returns None if the Keychain write fails (fail-closed: no metadata
+        is recorded for values that aren't safely stored).
         """
         hist = self._data.get(secret_name, SecretHistory(name=secret_name))
         new_version = hist.current_version + 1
 
-        # Store value in Keychain
+        # Store value in Keychain — fail-closed: abort if store fails
         kc = self._keychain(sync_service)
         acct = _version_account(secret_name, new_version)
         try:
-            kc.store(acct, value)
+            result = kc.store(acct, value)
+            if result is False:
+                return None
         except (KeyNotFoundError, Exception):
-            pass  # Best-effort: metadata still recorded for fingerprint tracking
+            return None
 
         entry = SecretVersion(
             version=new_version,

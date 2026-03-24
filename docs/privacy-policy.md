@@ -26,9 +26,17 @@ When you explicitly run `sync push` or use the `banto_sync_push` tool, banto sen
 ### validate (User-Initiated)
 When you explicitly run `validate` or use the `banto_validate` / `banto_validate_keychain` tools, banto sends API keys to their respective provider endpoints (e.g., OpenAI, Anthropic, Google) to perform read-only health checks (typically GET requests to /v1/models or equivalent). No data beyond the API key header is sent.
 
-Both actions:
+### chatgpt connect (User-Initiated)
+When you run `banto chatgpt connect`, banto starts a local MCP server and exposes it via a third-party tunnel service (ngrok or Cloudflare Tunnel). During this session:
+- **MCP request/response traffic** is proxied through the tunnel provider (ngrok Inc. or Cloudflare Inc.).
+- The tunnel provider may log connection metadata (IP addresses, timestamps, request sizes) per their own privacy policies.
+- Secret values are never included in MCP tool responses, but metadata about secret names, target platforms, sync status, and budget data may pass through the tunnel.
+- The tunnel URL contains a random capability token; only those with the URL can access the endpoint.
+- The tunnel session ends when you stop the command (Ctrl+C).
+
+All actions:
 - Are triggered only by explicit user or agent commands, never automatically.
-- Send data directly from your device to the target service, not through any banto server.
+- Send data directly from your device to the target service (or via tunnel for ChatGPT), not through any banto server.
 
 ## 3. Data Storage
 

@@ -167,14 +167,24 @@ class TestHistoryStore:
         assert store.get_history("nope") is None
 
     @patch("banto.sync.history.KeychainStore")
-    def test_record_keychain_failure_still_saves_metadata(self, mock_kc_cls, tmp_path: Path):
-        """If Keychain store fails, metadata is still recorded (fingerprint tracking)."""
+    def test_record_keychain_failure_does_not_save_metadata(self, mock_kc_cls, tmp_path: Path):
+        """If Keychain store fails, no metadata is recorded (fail-closed)."""
         from banto.keychain import KeyNotFoundError
         mock_kc = mock_kc_cls.return_value
         mock_kc.store.side_effect = KeyNotFoundError("test")
 
         store = HistoryStore(path=tmp_path / "history.json")
         v = store.record("test", "value", "svc")
-        assert v.version == 1
-        assert v.fingerprint == _fingerprint("value")
-        assert len(store.list_versions("test")) == 1
+        assert v is None
+        assert len(store.list_versions("test")) == 0
+
+    @patch("banto.sync.history.KeychainStore")
+    def test_record_keychain_returns_false_does_not_save(self, mock_kc_cls, tmp_path: Path):
+        """If Keychain store returns False, no metadata is recorded (fail-closed)."""
+        mock_kc = mock_kc_cls.return_value
+        mock_kc.store.return_value = False
+
+        store = HistoryStore(path=tmp_path / "history.json")
+        v = store.record("test", "value", "svc")
+        assert v is None
+        assert len(store.list_versions("test")) == 0
