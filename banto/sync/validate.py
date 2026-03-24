@@ -158,6 +158,42 @@ SERVICE_PATTERNS: dict[str, str] = {
     "xai": "xai",
 }
 
+# Keychain service names to exclude from scanning.
+# These are managed by other tools, contain OAuth/session tokens (not API keys),
+# or pose security risks if validated (e.g. sending refresh tokens to wrong endpoints).
+EXCLUDED_SERVICES: set[str] = {
+    # GitHub CLI internal OAuth tokens — managed by `gh auth`
+    "gh:github.com",
+    # Claude Code session token — managed by Claude Code
+    "claude-code-oauth-token",
+    # OAuth tokens / refresh tokens — sending these to validation endpoints
+    # would be a security risk (token leakage to wrong service)
+    "claude-mcp-freee-access-token",
+    "claude-mcp-freee-refresh-token",
+    # Safari / macOS system entries
+    "Safari Forms AutoFill Encryption Key",
+    "MetadataKeychain",
+}
+
+# Patterns for service names that should never be scanned.
+# Broader than EXCLUDED_SERVICES — matches substrings.
+EXCLUDED_PATTERNS: list[str] = [
+    "oauth",        # OAuth tokens should not be sent to API validation endpoints
+    "refresh-token",  # Refresh tokens are not API keys
+    "access-token",   # Short-lived tokens managed by OAuth flows
+    "session",      # Session tokens
+    "safari",       # macOS Safari internal
+    "metadata",     # macOS system metadata
+]
+
+
+def should_exclude(service_name: str) -> bool:
+    """Check if a Keychain service should be excluded from validation."""
+    if service_name in EXCLUDED_SERVICES:
+        return True
+    svc_lower = service_name.lower()
+    return any(p in svc_lower for p in EXCLUDED_PATTERNS)
+
 
 def validate_key(provider: str, value: str) -> ValidationResult:
     """Validate an API key for a known provider.

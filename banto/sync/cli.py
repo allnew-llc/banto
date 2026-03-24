@@ -630,7 +630,7 @@ def cmd_sync_validate(args: list[str]) -> None:
     With --keychain flag (or no sync.json secrets), scans Keychain directly
     for known provider patterns.
     """
-    from .validate import validate_key, list_supported_providers, SERVICE_PATTERNS
+    from .validate import validate_key, list_supported_providers, SERVICE_PATTERNS, should_exclude
 
     config, _ = _load_config(args)
     scan_keychain = "--keychain" in args or not config.secrets
@@ -678,7 +678,7 @@ def cmd_sync_validate(args: list[str]) -> None:
             # Filter for known provider patterns and retrieve values
             seen: set[str] = set()
             for svc, acct in entries_found:
-                if not svc or svc in seen:
+                if not svc or svc in seen or should_exclude(svc):
                     continue
                 svc_lower = svc.lower()
                 for pattern in SERVICE_PATTERNS:
