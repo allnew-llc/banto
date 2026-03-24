@@ -40,6 +40,19 @@ Agent (Claude/Codex)              Human
 - MCP tool usage guide with common workflows
 - Critical rule: agents must NEVER read secret values
 
+### New: OpenAI Apps SDK compatibility
+
+- MCP server supports 3 transports: `stdio` (Claude Code), `sse` (Apps SDK dev), `http` (production)
+  - `banto-mcp --transport sse --port 8385`
+  - `banto-mcp --transport http --port 8385`
+- All 9 tools have OpenAI-required annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`
+- Response format compatible with `structuredContent` + `content` model
+
+### New: --json flag for all CLI commands
+
+- Every command supports `--json` for machine-readable output
+- Enables AI agents to parse results without screen-scraping
+
 ### Breaking Changes
 
 - Major version bump (4.x → 5.0) due to new agent-native architecture

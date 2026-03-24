@@ -1,30 +1,44 @@
 # Copyright 2025-2026 AllNew LLC
 # Licensed under LicenseRef-Dual (see LICENSE)
-"""MCP server for banto — exposes secret management tools to Claude Code.
+"""MCP server for banto — exposes secret management tools to AI agents.
 
-Critical design principle: **agents NEVER see secret values**.
-All tools return metadata, status, and results — never the actual API key values.
+Compatible with:
+  - Claude Code (stdio transport)
+  - OpenAI Apps SDK (HTTP/SSE transport)
+  - Any MCP-compatible client
 
-Launch via:
-    python -m banto.mcp_server
-    # or via MCP config with the `banto-mcp` entry point
+Critical design: agents NEVER see secret values.
+All tools return metadata, status, and results — never API key values.
+
+Launch:
+    banto-mcp                          # stdio (Claude Code)
+    banto-mcp --transport sse          # SSE (Apps SDK dev)
+    banto-mcp --transport http --port 8385  # HTTP (Apps SDK prod)
 """
 from __future__ import annotations
 
+import sys
+
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("banto", description="Local-first secret management — sync, validate, budget")
+mcp = FastMCP(
+    "banto",
+    description="Local-first secret management — sync, validate, budget, leases",
+)
 
 
-# ---------------------------------------------------------------------------
-# Tool 1: banto_sync_status
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 1: sync_status (read-only) ──────────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
+})
 async def banto_sync_status() -> dict:
-    """Show sync status matrix (secrets x targets, with existence status).
+    """Show sync status matrix — which secrets exist in Keychain and each target.
 
-    Returns a list of secrets with Keychain existence and per-target status.
-    No secret values are returned — only metadata.
+    Returns metadata only. No secret values are ever included.
+    Use this to check if secrets are properly deployed.
     """
     from .sync.config import SyncConfig
     from .sync.sync import check_status
@@ -34,69 +48,67 @@ async def banto_sync_status() -> dict:
         return {"secrets": [], "message": "No secrets configured in sync.json"}
 
     entries = check_status(config)
-    result = []
-    for entry in entries:
-        result.append({
-            "name": entry.secret_name,
-            "env_name": entry.env_name,
-            "keychain_exists": entry.keychain_exists,
-            "targets": {label: status for label, status in entry.target_status.items()},
-        })
-    return {"secrets": result}
+    secrets = [
+        {"name": e.secret_name, "env_name": e.env_name,
+         "keychain_exists": e.keychain_exists,
+         "targets": {label: status for label, status in e.target_status.items()}}
+        for e in entries
+    ]
+    return {"secrets": secrets, "count": len(secrets)}
 
 
-# ---------------------------------------------------------------------------
-# Tool 2: banto_sync_push
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 2: sync_push (destructive) ──────────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "openWorldHint": False,
+})
 async def banto_sync_push(name: str = "") -> dict:
     """Push secrets from Keychain to cloud targets.
 
+    Deploys secrets to configured platforms (Vercel, Cloudflare, AWS, etc.).
+    The agent never sees the values — they go directly from Keychain to target.
+
     Args:
         name: Optional specific secret name. If empty, pushes all secrets.
-
-    Returns sync results with success/failure per target.
-    No secret values are returned.
     """
     from .sync.config import SyncConfig
     from .sync.sync import sync_all, sync_secret
 
     config = SyncConfig.load()
-
     if name:
         report = sync_secret(config, name)
     else:
         report = sync_all(config)
 
-    results = [
-        {
-            "name": r.secret_name,
-            "target": r.target_label,
-            "success": r.success,
-            "message": r.message,
-        }
-        for r in report.results
-    ]
     return {
         "ok": report.all_ok,
         "ok_count": report.ok_count,
         "fail_count": report.fail_count,
-        "results": results,
+        "results": [
+            {"name": r.secret_name, "target": r.target_label,
+             "success": r.success, "message": r.message}
+            for r in report.results
+        ],
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 3: banto_sync_audit
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 3: sync_audit (read-only) ───────────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
+})
 async def banto_sync_audit(max_age_days: int = 0) -> dict:
-    """Check drift, fingerprint changes, and staleness of synced secrets.
+    """Check drift, fingerprint changes, and staleness of secrets.
+
+    Compares Keychain state against last-pushed fingerprints and target existence.
+    Returns issues found — no secret values, only fingerprint hashes and dates.
 
     Args:
         max_age_days: If >0, flag secrets not rotated within this many days.
-
-    Returns a list of issues found (drift, staleness, mismatches).
-    No secret values are returned — only fingerprints and status.
     """
     from datetime import datetime, timezone
 
@@ -115,8 +127,6 @@ async def banto_sync_audit(max_age_days: int = 0) -> dict:
 
     for entry in entries:
         name = entry.secret_name
-
-        # Existence drift
         if not entry.keychain_exists:
             issues.append(f"DRIFT {entry.env_name}: missing in Keychain")
             continue
@@ -124,7 +134,6 @@ async def banto_sync_audit(max_age_days: int = 0) -> dict:
             if status is False:
                 issues.append(f"DRIFT {entry.env_name} -> {label}")
 
-        # Fingerprint drift
         secret_entry = config.get_secret(name)
         value = kc.get(secret_entry.account) if secret_entry else None
         if value:
@@ -139,7 +148,6 @@ async def banto_sync_audit(max_age_days: int = 0) -> dict:
             elif drift == "never_pushed":
                 issues.append(f"DRIFT {name}: never pushed (no sync record)")
 
-    # Rotation age check
     if max_age_days and max_age_days > 0:
         history = HistoryStore()
         now = datetime.now(timezone.utc)
@@ -155,28 +163,27 @@ async def banto_sync_audit(max_age_days: int = 0) -> dict:
                     ts = ts.replace(tzinfo=timezone.utc)
                 age_days = (now - ts).days
                 if age_days > max_age_days:
-                    issues.append(
-                        f"STALE {name}: last rotated {age_days}d ago "
-                        f"(threshold: {max_age_days}d)"
-                    )
+                    issues.append(f"STALE {name}: last rotated {age_days}d ago (threshold: {max_age_days}d)")
             except (ValueError, TypeError):
-                issues.append(f"STALE {name}: unparseable timestamp in history")
+                issues.append(f"STALE {name}: unparseable timestamp")
 
-    return {
-        "ok": len(issues) == 0,
-        "issues": issues,
-    }
+    return {"ok": len(issues) == 0, "issues": issues}
 
 
-# ---------------------------------------------------------------------------
-# Tool 4: banto_validate
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 4: validate (read-only, openWorld) ──────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": True,
+})
 async def banto_validate() -> dict:
-    """Validate API keys configured in sync.json against provider endpoints.
+    """Validate API keys in sync.json against provider endpoints.
 
-    Makes minimal read-only API calls to check if keys are valid.
-    No secret values are returned — only pass/fail/unknown status.
+    Makes minimal read-only API calls (GET /v1/models etc.) to check validity.
+    Returns pass/fail/unknown per key. No secret values in response.
+
+    Supported providers: OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI.
     """
     from .keychain import KeychainStore
     from .sync.config import SyncConfig
@@ -191,35 +198,29 @@ async def banto_validate() -> dict:
     for name, entry in config.secrets.items():
         value = kc.get(entry.account)
         if not value:
-            results.append({
-                "name": name,
-                "provider": name,
-                "status": "unknown",
-                "message": "No value in Keychain",
-            })
+            results.append({"name": name, "provider": name,
+                           "status": "unknown", "message": "Not in Keychain"})
             continue
         vr = validate_key(name, value)
-        results.append({
-            "name": name,
-            "provider": vr.provider,
-            "status": vr.status,
-            "message": vr.message,
-        })
+        results.append({"name": name, "provider": vr.provider,
+                        "status": vr.status, "message": vr.message})
     return {"results": results}
 
 
-# ---------------------------------------------------------------------------
-# Tool 5: banto_validate_keychain
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 5: validate_keychain (read-only, openWorld) ─────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": True,
+})
 async def banto_validate_keychain() -> dict:
     """Scan Keychain for known provider API keys and validate them.
 
-    Searches the login keychain for services matching known provider patterns
-    (openai, anthropic, gemini, github, cloudflare, xai), then validates
-    each key with a lightweight read-only API call.
+    Searches for keys matching known providers (OpenAI, Anthropic, Gemini,
+    GitHub, Cloudflare, xAI) and tests each with a read-only API call.
 
-    No secret values are returned — only provider name and pass/fail status.
+    Returns pass/fail/unknown per key. No secret values in response.
     """
     import re
     import subprocess
@@ -227,8 +228,7 @@ async def banto_validate_keychain() -> dict:
     from .sync.validate import SERVICE_PATTERNS, should_exclude, validate_key
 
     result = subprocess.run(
-        ["security", "dump-keychain"],
-        capture_output=True, text=True,
+        ["security", "dump-keychain"], capture_output=True, text=True,
     )
     if result.returncode != 0:
         return {"results": [], "message": "Failed to read Keychain"}
@@ -242,10 +242,8 @@ async def banto_validate_keychain() -> dict:
         stripped = line.strip()
         if stripped.startswith("class:"):
             if "svce" in current_attrs:
-                entries_found.append((
-                    current_attrs.get("svce", ""),
-                    current_attrs.get("acct", ""),
-                ))
+                entries_found.append((current_attrs.get("svce", ""),
+                                     current_attrs.get("acct", "")))
             current_attrs = {}
             continue
         m = svce_re.search(stripped)
@@ -255,12 +253,9 @@ async def banto_validate_keychain() -> dict:
         if m:
             current_attrs["acct"] = m.group(1)
     if "svce" in current_attrs:
-        entries_found.append((
-            current_attrs.get("svce", ""),
-            current_attrs.get("acct", ""),
-        ))
+        entries_found.append((current_attrs.get("svce", ""),
+                             current_attrs.get("acct", "")))
 
-    # Filter for known provider patterns and validate
     seen: set[str] = set()
     results = []
     for svc, acct in entries_found:
@@ -277,68 +272,60 @@ async def banto_validate_keychain() -> dict:
                     ).stdout.strip()
                     if val:
                         vr = validate_key(svc, val)
-                        results.append({
-                            "name": svc,
-                            "provider": vr.provider,
-                            "status": vr.status,
-                            "message": vr.message,
-                        })
+                        results.append({"name": svc, "provider": vr.provider,
+                                        "status": vr.status, "message": vr.message})
                     else:
-                        results.append({
-                            "name": svc,
-                            "provider": pattern,
-                            "status": "unknown",
-                            "message": "Could not retrieve value",
-                        })
+                        results.append({"name": svc, "provider": pattern,
+                                        "status": "unknown", "message": "Could not retrieve"})
                 except Exception:
-                    results.append({
-                        "name": svc,
-                        "provider": pattern,
-                        "status": "unknown",
-                        "message": "Error retrieving key",
-                    })
+                    results.append({"name": svc, "provider": pattern,
+                                    "status": "unknown", "message": "Retrieval error"})
                 break
 
     return {"results": results}
 
 
-# ---------------------------------------------------------------------------
-# Tool 6: banto_budget_status
-# ---------------------------------------------------------------------------
-@mcp.tool()
-async def banto_budget_status() -> dict:
-    """Show current budget status — remaining balance, usage, limits.
+# ── Tool 6: budget_status (read-only) ────────────────────────────
 
-    Returns budget breakdown by provider and model.
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
+})
+async def banto_budget_status() -> dict:
+    """Show current budget status — remaining balance, usage breakdown.
+
+    Returns budget data by provider and model.
     If budget is not configured, returns {budget_enabled: false}.
     """
     try:
         from .guard import CostGuard
         guard = CostGuard()
-        return guard.get_remaining_budget()
-    except (FileNotFoundError, KeyError, Exception) as exc:
-        return {
-            "budget_enabled": False,
-            "message": f"Budget not configured: {type(exc).__name__}",
-        }
+        status = guard.get_remaining_budget()
+        status["budget_enabled"] = True
+        return status
+    except Exception:
+        return {"budget_enabled": False, "message": "Budget not configured"}
 
 
-# ---------------------------------------------------------------------------
-# Tool 7: banto_register_key
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 7: register_key (not destructive, openWorld) ────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "openWorldHint": True,
+})
 async def banto_register_key(provider: str = "") -> dict:
-    """Open a browser popup for the user to enter an API key securely.
+    """Open a browser popup for the user to enter an API key.
 
-    The popup runs a temporary local HTTP server. The user enters the key
-    in the browser — it goes directly to Keychain. The agent never sees
-    the key value.
+    The popup runs on localhost. The user enters the key in the browser —
+    it goes directly to Keychain. The agent NEVER sees the key value.
+
+    After the user enters the key, use banto_validate to verify it works,
+    then banto_sync_push to deploy it to cloud targets.
 
     Args:
-        provider: Optional provider hint (e.g. "openai", "anthropic").
-                  Pre-fills the provider field in the popup.
-
-    Returns the URL the user should open.
+        provider: Optional hint (e.g. "openai"). Pre-fills the provider field.
     """
     from .register_popup import serve_register_popup
 
@@ -348,15 +335,23 @@ async def banto_register_key(provider: str = "") -> dict:
         "message": "Browser opened for key registration",
         "url": url,
         "provider": provider or "(any)",
+        "next_steps": [
+            "Wait for user to enter the key in the browser",
+            "Use banto_validate to verify the key works",
+            "Use banto_sync_push to deploy to cloud targets",
+        ],
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 8: banto_lease_list
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 8: lease_list (read-only) ───────────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
+})
 async def banto_lease_list() -> dict:
-    """List active leases (dynamic secrets with TTL).
+    """List active dynamic leases (short-lived credentials).
 
     Returns metadata only — never the credential values.
     Each lease shows name, TTL, expiry, and remaining seconds.
@@ -365,18 +360,20 @@ async def banto_lease_list() -> dict:
 
     mgr = LeaseManager()
     active = mgr.list_leases()
-    return {"leases": active}
+    return {"leases": active, "count": len(active)}
 
 
-# ---------------------------------------------------------------------------
-# Tool 9: banto_lease_cleanup
-# ---------------------------------------------------------------------------
-@mcp.tool()
+# ── Tool 9: lease_cleanup (destructive) ──────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "openWorldHint": False,
+})
 async def banto_lease_cleanup() -> dict:
     """Revoke all expired leases to free Keychain entries.
 
-    Runs revocation commands for expired leases and removes
-    them from Keychain.
+    Runs revocation commands and removes expired credentials from Keychain.
     """
     from .lease import LeaseManager
 
@@ -385,12 +382,41 @@ async def banto_lease_cleanup() -> dict:
     return {"revoked_count": revoked}
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+# ── Entry point ──────────────────────────────────────────────────
+
 def main() -> None:
-    """Run the banto MCP server."""
-    mcp.run()
+    """Run the banto MCP server.
+
+    Supports multiple transports:
+        banto-mcp                           # stdio (default, Claude Code)
+        banto-mcp --transport sse           # SSE (OpenAI Apps SDK dev)
+        banto-mcp --transport http --port 8385  # HTTP (production)
+    """
+    transport = "stdio"
+    port = 8385
+
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--transport" and i + 1 < len(args):
+            transport = args[i + 1]
+            i += 2
+        elif args[i] == "--port" and i + 1 < len(args):
+            port = int(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    elif transport == "sse":
+        mcp.run(transport="sse", sse_path="/sse", port=port)
+    elif transport == "http":
+        mcp.run(transport="streamable-http", path="/mcp", port=port)
+    else:
+        print(f"Unknown transport: {transport}", file=sys.stderr)
+        print("Supported: stdio, sse, http", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
