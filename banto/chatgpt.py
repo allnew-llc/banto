@@ -16,6 +16,8 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import subprocess
 import sys
 import threading
@@ -33,13 +35,17 @@ def _find_tunnel_tool() -> str | None:
     return None
 
 
-def _start_mcp_server(port: int) -> subprocess.Popen:
-    """Start banto-mcp in HTTP mode."""
+def _start_mcp_server(port: int, path_token: str = "") -> subprocess.Popen:
+    """Start banto-mcp in HTTP mode with optional capability URL path."""
+    env = os.environ.copy()
+    if path_token:
+        env["BANTO_MCP_PATH_TOKEN"] = path_token
     return subprocess.Popen(
         [sys.executable, "-m", "banto.mcp_server",
          "--transport", "http", "--port", str(port)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
 
 
@@ -127,8 +133,12 @@ def connect(args: list[str]) -> None:
             print("  brew install cloudflared", file=sys.stderr)
             sys.exit(1)
 
+    # Generate capability URL path token for secure tunneled access
+    path_token = secrets.token_urlsafe(16)
+    mcp_path = f"/mcp-{path_token}"
+
     print(f"Starting banto MCP server on port {port}...")
-    mcp_proc = _start_mcp_server(port)
+    mcp_proc = _start_mcp_server(port, path_token=path_token)
     time.sleep(1)
 
     if mcp_proc.poll() is not None:
@@ -147,7 +157,7 @@ def connect(args: list[str]) -> None:
         tunnel_proc.terminate()
         sys.exit(1)
 
-    mcp_url = f"{url}/mcp"
+    mcp_url = f"{url}{mcp_path}"
 
     print()
     print("=" * 60)
@@ -155,6 +165,9 @@ def connect(args: list[str]) -> None:
     print("=" * 60)
     print()
     print(f"  MCP Endpoint: {mcp_url}")
+    print()
+    print("  The URL contains a secret token — treat it like a password.")
+    print("  Anyone with this URL can access your banto instance.")
     print()
     print("  To connect in ChatGPT:")
     print("  1. Settings -> Connectors -> Create")

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -568,12 +569,26 @@ function toast(msg, type) {
 function showSpinner() { document.getElementById('spinner').classList.add('active'); }
 function hideSpinner() { document.getElementById('spinner').classList.remove('active'); }
 
+var _csrfToken = null;
+async function _ensureCsrf() {
+  if (!_csrfToken) {
+    var r = await fetch('/api/csrf-token');
+    var d = await r.json();
+    _csrfToken = d.token;
+  }
+  return _csrfToken;
+}
+
 async function api(method, path, body) {
   showSpinner();
   try {
-    var opts = { method: method };
+    var opts = { method: method, headers: {} };
+    if (method === 'POST') {
+      var csrf = await _ensureCsrf();
+      opts.headers['X-CSRF-Token'] = csrf;
+    }
     if (body !== undefined && body !== null) {
-      opts.headers = { 'Content-Type': 'application/json' };
+      opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
     var r = await fetch(path, opts);
@@ -1358,9 +1373,35 @@ refresh();
 class SyncUIHandler(BaseHTTPRequestHandler):
     config: SyncConfig
     config_path: Path
+    csrf_token: str = ""
+    server_port: int = DEFAULT_PORT
 
     def log_message(self, format, *args):  # noqa: A002
         pass
+
+    def _check_origin(self) -> bool:
+        """Reject POST requests from foreign origins (CSRF defense)."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True  # Same-origin requests may omit Origin
+        allowed = {
+            f"http://localhost:{self.server_port}",
+            f"http://127.0.0.1:{self.server_port}",
+        }
+        return origin in allowed
+
+    def _check_csrf(self) -> bool:
+        """Validate X-CSRF-Token header against session token."""
+        token = self.headers.get("X-CSRF-Token", "")
+        return token == self.csrf_token
+
+    def _reject(self, code: int, message: str) -> None:
+        body = json.dumps({"ok": False, "error": message}).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
@@ -1375,6 +1416,8 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             platform_json = json.dumps(ALL_PLATFORMS)
             html = _HTML.replace("PLATFORM_LIST_PLACEHOLDER", platform_json)
             self.wfile.write(html.encode("utf-8"))
+        elif path == "/api/csrf-token":
+            self._json_response({"token": self.csrf_token})
         elif path == "/api/status":
             self._json_response(_build_status_json(self.config))
         elif path == "/api/history":
@@ -1389,6 +1432,22 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):  # noqa: N802
+        # Origin check — reject cross-origin POST requests
+        if not self._check_origin():
+            self._reject(403, "Forbidden: invalid Origin")
+            return
+
+        # Content-Type check — only accept JSON
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("application/json"):
+            self._reject(415, "Unsupported Media Type: expected application/json")
+            return
+
+        # CSRF token check
+        if not self._check_csrf():
+            self._reject(403, "Forbidden: invalid or missing CSRF token")
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
 
@@ -1459,7 +1518,10 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         self.config.save(self.config_path)
 
         history = HistoryStore()
-        history.record(name, value, self.config.keychain_service)
+        ver = history.record(name, value, self.config.keychain_service)
+        if ver is None:
+            self._json_response({"ok": False, "error": "Failed to record version history"})
+            return
 
         self._json_response({"ok": True})
 
@@ -1496,7 +1558,10 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "Keychain update failed"})
                 return
             history = HistoryStore()
-            history.record(name, new_value, self.config.keychain_service)
+            ver = history.record(name, new_value, self.config.keychain_service)
+            if ver is None:
+                self._json_response({"ok": False, "error": "Failed to record version history"})
+                return
 
         self.config.save(self.config_path)
         self._json_response({"ok": True})
@@ -1530,7 +1595,10 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             return
 
         history = HistoryStore()
-        history.record(name, value, self.config.keychain_service)
+        ver = history.record(name, value, self.config.keychain_service)
+        if ver is None:
+            self._json_response({"ok": False, "error": "Failed to record version history"})
+            return
 
         if entry.targets:
             report = sync_secret(self.config, name)
@@ -1773,8 +1841,14 @@ def serve(config: SyncConfig, port: int = DEFAULT_PORT,
           config_path: Path | None = None) -> None:
     """Start the local web UI server."""
     cfg_path = config_path or DEFAULT_CONFIG_PATH
-    handler = type("Handler", (SyncUIHandler,),
-                   {"config": config, "config_path": cfg_path})
+    csrf_token = secrets.token_urlsafe(32)
+
+    handler = type("Handler", (SyncUIHandler,), {
+        "config": config,
+        "config_path": cfg_path,
+        "csrf_token": csrf_token,
+        "server_port": port,
+    })
 
     server = HTTPServer(("127.0.0.1", port), handler)
     url = f"http://localhost:{port}"

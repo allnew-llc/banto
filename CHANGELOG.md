@@ -1,5 +1,26 @@
 # Changelog
 
+## 5.1.0 (2026-03-25) — Security Hardening + ChatGPT Connector
+
+### Security
+
+- **CSRF + Origin defense for web UI**: All POST endpoints now require a per-session CSRF token (`X-CSRF-Token` header), validate `Origin` header against localhost, and enforce `Content-Type: application/json`
+- **Capability URL for ChatGPT connect**: `banto chatgpt connect` generates a random path token (`/mcp-{token}`). The URL is the bearer credential — no separate auth needed, but URL must be treated as secret
+- **History fail-closed**: `record()` no longer saves metadata if Keychain write fails. Previously recorded metadata for broken versions (fail-open). Now returns `None` on failure
+- **Register popup**: localhost-only, random port, single-use (already existed but now noted as reviewed and confirmed by third-party audit)
+
+### New
+
+- **`banto chatgpt connect`**: One-command setup for ChatGPT Connector — starts MCP HTTP server + ngrok/cloudflared tunnel, prints secure Connector URL
+- **Widget templates** (`widgets.py`): 6 inline card templates for ChatGPT (sync status, validation, register prompt, budget, audit, leases)
+- **Golden test prompts** (`docs/chatgpt-test-prompts.md`): 14 test cases for ChatGPT App testing
+- **Privacy Policy** (`docs/privacy-policy.md`): EN/JA dual-language, covers tunnel provider disclosure
+- **App icon** (`docs/assets/app-icon.png`)
+
+### Note on ChatGPT App Store
+
+banto is designed for use as a **local ChatGPT Connector** (Developer Mode), not for public App Store submission. OpenAI's App Store submission guidelines prohibit collecting API keys, which is banto's core function. The local Connector approach provides full functionality without this restriction.
+
 ## 5.0.0 (2026-03-24) — Agent-Native Secret Management
 
 ### Architecture: Agent + Human collaboration model
