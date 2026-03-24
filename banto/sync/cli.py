@@ -102,12 +102,36 @@ def cmd_sync_status(args: list[str]) -> None:
 def cmd_sync_push(args: list[str]) -> None:
     """Push secrets from Keychain to all targets."""
     config, _ = _load_config(args)
-    # Check if a specific name was given
+
+    do_validate = "--validate" in args
     name = None
     for a in args:
         if not a.startswith("--"):
             name = a
             break
+
+    # Pre-push validation
+    if do_validate:
+        from .validate import validate_key
+        kc = KeychainStore(service_prefix=config.keychain_service)
+        secrets_to_check = {name: config.get_secret(name)} if name else config.secrets
+        invalid = []
+        for sname, entry in secrets_to_check.items():
+            if entry is None:
+                continue
+            value = kc.get(entry.account)
+            if value is None:
+                continue
+            result = validate_key(sname, value)
+            if not result.valid:
+                invalid.append(f"  {sname}: {result.message}")
+        if invalid:
+            print("Pre-push validation FAILED:\n")
+            for line in invalid:
+                print(line)
+            print("\nFix invalid keys before pushing. Use --no-validate to skip.")
+            sys.exit(1)
+        print("Pre-push validation passed.\n")
 
     if name:
         report = sync_secret(config, name)
@@ -199,25 +223,70 @@ def cmd_sync_add(args: list[str]) -> None:
 
 
 def cmd_sync_audit(args: list[str]) -> None:
-    """Check drift across all targets. Optionally flag stale secrets."""
+    """Check drift, staleness, fingerprint drift, and local file values."""
     config, _ = _load_config(args)
+    from .sync_state import SyncState, fingerprint as fp
 
     max_age_days = None
     for i, a in enumerate(args):
         if a == "--max-age-days" and i + 1 < len(args):
             max_age_days = int(args[i + 1])
 
+    kc = KeychainStore(service_prefix=config.keychain_service)
     entries = check_status(config)
+    state = SyncState()
     issues: list[str] = []
+    info: list[str] = []
 
     for entry in entries:
+        name = entry.secret_name
+
+        # 1. Existence drift
         if not entry.keychain_exists:
             issues.append(f"  DRIFT   {entry.env_name}: missing in Keychain")
+            continue
         for label, status in entry.target_status.items():
             if status is False:
                 issues.append(f"  DRIFT   {entry.env_name} -> {label}")
 
-    # Rotation age check
+        # 2. Fingerprint drift (Keychain changed since last push?)
+        secret_entry = config.get_secret(name)
+        value = kc.get(secret_entry.account) if secret_entry else None
+        if value:
+            drift = state.check_drift(name, value)
+            rec = state.get_push_record(name)
+            if drift == "drift_local":
+                pushed_at = rec.pushed_at[:10] if rec else "?"
+                issues.append(
+                    f"  DRIFT   {name}: Keychain changed since last push "
+                    f"({fp(value)} != {rec.fingerprint}, pushed {pushed_at})"
+                )
+            elif drift == "never_pushed":
+                issues.append(f"  DRIFT   {name}: never pushed (no sync record)")
+            elif drift == "in_sync" and rec:
+                info.append(f"  OK      {name}: fingerprint={fp(value)} pushed={rec.pushed_at[:10]}")
+
+        # 3. Local file value comparison
+        if secret_entry and value:
+            for target in secret_entry.targets:
+                if target.platform == "local" and target.file:
+                    try:
+                        content = Path(target.file).read_text(encoding="utf-8")
+                        # Search for env_name=value in file
+                        expected = f"{secret_entry.env_name}={value}"
+                        if expected in content:
+                            info.append(f"  MATCH   {name} -> {target.file}: value matches")
+                        else:
+                            # Check if key exists but value differs
+                            if f"{secret_entry.env_name}=" in content:
+                                issues.append(
+                                    f"  MISMATCH {name} -> {target.file}: "
+                                    f"file value differs from Keychain"
+                                )
+                    except OSError:
+                        pass  # File not readable, existence already checked
+
+    # 4. Rotation age check
     if max_age_days is not None:
         history = HistoryStore()
         now = datetime.now(timezone.utc)
@@ -240,16 +309,25 @@ def cmd_sync_audit(args: list[str]) -> None:
             except (ValueError, TypeError):
                 issues.append(f"  STALE   {name}: unparseable timestamp in history")
 
+    # Output
+    if info:
+        print("BANTO SYNC AUDIT\n")
+        for line in info:
+            print(line)
+        print()
+
     if issues:
-        print(f"BANTO SYNC AUDIT — {len(issues)} issue(s) found:\n")
+        print(f"{len(issues)} issue(s) found:\n")
         for issue in issues:
             print(issue)
         sys.exit(1)
     else:
-        msg = "BANTO SYNC AUDIT — All secrets in sync."
+        msg = "All secrets in sync."
         if max_age_days is not None:
             msg += f" No secrets older than {max_age_days} days."
-        print(msg)
+        if not info:
+            print("BANTO SYNC AUDIT\n")
+        print(f"  {msg}")
 
 
 def cmd_sync_history(args: list[str]) -> None:
@@ -545,12 +623,49 @@ def cmd_sync_import(args: list[str]) -> None:
     print(f"Imported {count} secret(s) from {file_path.name}.")
 
 
+def cmd_sync_validate(args: list[str]) -> None:
+    """Validate API keys against provider endpoints."""
+    from .validate import validate_key, list_supported_providers
+
+    config, _ = _load_config(args)
+    kc = KeychainStore(service_prefix=config.keychain_service)
+
+    if not config.secrets:
+        print("No secrets configured.")
+        return
+
+    print(f"\nBANTO SYNC VALIDATE — Testing {len(config.secrets)} key(s)\n")
+    print(f"  Supported providers: {', '.join(list_supported_providers())}\n")
+
+    all_valid = True
+    for name, entry in config.secrets.items():
+        value = kc.get(entry.account)
+        if value is None:
+            print(f"  SKIP  {name}: not in Keychain")
+            continue
+
+        result = validate_key(name, value)
+        if result.valid:
+            print(f"  PASS  {name}: {result.message}")
+        else:
+            print(f"  FAIL  {name}: {result.message}")
+            all_valid = False
+
+    print()
+    if not all_valid:
+        print("  Some keys are invalid. Fix before pushing.")
+        sys.exit(1)
+    else:
+        print("  All keys valid.")
+
+
 SYNC_COMMANDS = {
     "status": cmd_sync_status,
     "push": cmd_sync_push,
     "add": cmd_sync_add,
     "rotate": cmd_sync_rotate,
     "audit": cmd_sync_audit,
+    "validate": cmd_sync_validate,
     "history": cmd_sync_history,
     "run": cmd_sync_run,
     "export": cmd_sync_export,
@@ -568,10 +683,11 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("Commands:")
         print("  init                Create default sync config")
         print("  status              Show sync status matrix")
-        print("  push [name]         Sync secrets to targets")
+        print("  validate            Test API keys against provider endpoints")
+        print("  push [--validate]   Sync secrets to targets (--validate first)")
         print("  add <name> ...      Add a new secret")
         print("  rotate <name>       Rotate a secret (update + re-sync)")
-        print("  audit [--max-age-days N]  Check drift + stale secrets")
+        print("  audit [--max-age-days N]  Check drift + fingerprint + stale")
         print("  history <name>      Show version history")
         print("  run [--env E] -- <cmd>  Run command with secrets as env vars")
         print("  export [--format]   Export secrets (env/json/docker)")
