@@ -13,7 +13,9 @@ back to the browser.
 from __future__ import annotations
 
 import json
+import re
 import webbrowser
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -52,13 +54,17 @@ def _build_history_json(config: SyncConfig) -> dict[str, list[dict]]:
 
 
 def _build_config_json(config: SyncConfig) -> dict:
+    store = HistoryStore()
     secrets = []
     for name, entry in config.secrets.items():
+        versions = store.list_versions(name)
+        added_at = versions[0].timestamp if versions else ""
         secrets.append({
             "name": name, "env_name": entry.env_name,
             "description": entry.description, "account": entry.account,
             "targets": [t.to_dict() for t in entry.targets],
             "target_labels": [t.label for t in entry.targets],
+            "added_at": added_at,
         })
     return {
         "keychain_service": config.keychain_service,
@@ -182,6 +188,12 @@ tr:hover td { background: rgba(22, 27, 34, 0.5); }
 .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
 .empty-state h3 { font-size: 16px; color: var(--text2); margin-bottom: 4px; }
 .empty-state p { font-size: 13px; }
+
+/* Sortable tables */
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text); }
+th.sort-asc::after { content: ' \\25b2'; font-size: 10px; }
+th.sort-desc::after { content: ' \\25bc'; font-size: 10px; }
 
 /* Status indicators */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
@@ -432,9 +444,9 @@ select { cursor: pointer; -webkit-appearance: none; appearance: none;
     <div class="toolbar-spacer"></div>
   </div>
   <div class="table-wrapper">
-    <table><thead><tr>
-      <th style="width:28%">Secret</th><th style="width:10%">Keychain</th>
-      <th>Targets</th><th style="width:180px">Actions</th>
+    <table id="status-table"><thead><tr>
+      <th class="sortable" style="width:28%">Secret</th><th class="sortable" style="width:10%">Keychain</th>
+      <th class="sortable">Targets</th><th style="width:180px">Actions</th>
     </tr></thead>
     <tbody id="status-body"></tbody></table>
   </div>
@@ -452,8 +464,8 @@ select { cursor: pointer; -webkit-appearance: none; appearance: none;
     </div>
   </div>
   <div class="table-wrapper">
-    <table><thead><tr>
-      <th>Name</th><th>Env Var</th><th>Description</th><th>Targets</th><th style="width:140px">Actions</th>
+    <table id="secrets-table"><thead><tr>
+      <th class="sortable">Name</th><th class="sortable">Env Var</th><th class="sortable">Description</th><th class="sortable">Added</th><th class="sortable">Targets</th><th style="width:140px">Actions</th>
     </tr></thead>
     <tbody id="secrets-body"></tbody></table>
   </div>
@@ -586,6 +598,117 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeModal();
 });
 
+/* ===================== SORTABLE TABLES ===================== */
+var sortState = {};
+
+function sortTable(tableId, colIndex) {
+  var table = document.getElementById(tableId);
+  if (!table) return;
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  if (rows.length === 0) return;
+
+  var key = tableId + ':' + colIndex;
+  var dir = (sortState[key] === 'asc') ? 'desc' : 'asc';
+  sortState[key] = dir;
+
+  // Clear sort classes from all headers in this table
+  var ths = table.querySelectorAll('th.sortable');
+  for (var i = 0; i < ths.length; i++) {
+    ths[i].classList.remove('sort-asc', 'sort-desc');
+  }
+  // Set active sort indicator
+  var activeTh = table.querySelectorAll('th')[colIndex];
+  if (activeTh) activeTh.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+
+  // Status priority for badge-based columns
+  var statusPriority = { 'fail': 0, 'unknown': 1, 'pass': 2 };
+
+  rows.sort(function(a, b) {
+    var cellA = a.cells[colIndex];
+    var cellB = b.cells[colIndex];
+    if (!cellA || !cellB) return 0;
+
+    var valA, valB;
+
+    // Detect status badge columns
+    var badgeA = cellA.querySelector('.badge-fail, .badge-ok, .badge-warn');
+    var badgeB = cellB.querySelector('.badge-fail, .badge-ok, .badge-warn');
+    if (badgeA && badgeB) {
+      valA = badgeA.classList.contains('badge-fail') ? 0 : badgeA.classList.contains('badge-warn') ? 1 : 2;
+      valB = badgeB.classList.contains('badge-fail') ? 0 : badgeB.classList.contains('badge-warn') ? 1 : 2;
+    } else {
+      // Check for data-sort-value attribute (used for status priority etc.)
+      valA = cellA.getAttribute('data-sort-value');
+      valB = cellB.getAttribute('data-sort-value');
+      if (valA !== null && valB !== null) {
+        // Try numeric comparison
+        var nA = parseFloat(valA), nB = parseFloat(valB);
+        if (!isNaN(nA) && !isNaN(nB)) {
+          valA = nA;
+          valB = nB;
+        }
+      } else {
+        valA = (cellA.textContent || '').trim().toLowerCase();
+        valB = (cellB.textContent || '').trim().toLowerCase();
+      }
+    }
+
+    var cmp;
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      cmp = valA - valB;
+    } else {
+      valA = String(valA);
+      valB = String(valB);
+      cmp = valA.localeCompare(valB);
+    }
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
+  for (var i = 0; i < rows.length; i++) {
+    tbody.appendChild(rows[i]);
+  }
+}
+
+// Event delegation for sortable headers — works on static and dynamic tables
+document.addEventListener('click', function(e) {
+  var th = e.target.closest('th.sortable');
+  if (!th) return;
+  var table = th.closest('table');
+  if (!table || !table.id) return;
+  var headerRow = th.parentElement;
+  var colIndex = Array.prototype.indexOf.call(headerRow.children, th);
+  sortTable(table.id, colIndex);
+});
+
+/* ===================== DATE FORMATTING ===================== */
+function formatDate(isoStr) {
+  if (!isoStr) return '\\u2014';
+  try {
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '\\u2014';
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+  } catch (e) {
+    return '\\u2014';
+  }
+}
+
+function formatDateShort(isoStr) {
+  if (!isoStr) return '\\u2014';
+  try {
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '\\u2014';
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  } catch (e) {
+    return '\\u2014';
+  }
+}
+
 /* ===================== DATA LOADING ===================== */
 async function refresh() {
   showSpinner();
@@ -662,16 +785,29 @@ function showValidateResults(title, results) {
   toast('Validate: ' + parts.join(', '), failed > 0 ? 'fail' : (unknown > 0 ? 'info' : undefined));
 
   var html = '<div class="card" style="margin-top:12px;">';
-  html += '<h3>' + esc(title) + ' — Validation Results</h3>';
-  html += '<table><thead><tr><th>Key</th><th>Provider</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+  html += '<h3>' + esc(title) + ' \\u2014 Validation Results</h3>';
+  html += '<table id="validate-table"><thead><tr>';
+  html += '<th class="sortable">Key</th><th class="sortable">Provider</th>';
+  html += '<th class="sortable">Status</th><th class="sortable">Details</th>';
+  html += '<th class="sortable">Created</th><th class="sortable">Modified</th>';
+  html += '</tr></thead><tbody>';
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
     var st = r.status || (r.valid ? 'pass' : 'fail');
     var badge;
     if (st === 'pass') badge = '<span class="badge badge-ok">PASS</span>';
     else if (st === 'fail') badge = '<span class="badge badge-fail">FAIL</span>';
-    else badge = '<span class="badge" style="background:#2d1f00;color:#d29922;">UNKNOWN</span>';
-    html += '<tr><td class="mono">' + esc(r.name) + '</td><td>' + esc(r.provider) + '</td><td>' + badge + '</td><td class="na">' + esc(r.message) + '</td></tr>';
+    else badge = '<span class="badge badge-warn">UNKNOWN</span>';
+    var createdAt = r.created_at ? formatDate(r.created_at) : '\\u2014';
+    var modifiedAt = r.modified_at ? formatDate(r.modified_at) : '\\u2014';
+    html += '<tr>';
+    html += '<td class="mono">' + esc(r.name) + '</td>';
+    html += '<td>' + esc(r.provider) + '</td>';
+    html += '<td data-sort-value="' + (st === 'fail' ? '0' : st === 'unknown' ? '1' : '2') + '">' + badge + '</td>';
+    html += '<td class="na">' + esc(r.message) + '</td>';
+    html += '<td data-sort-value="' + esc(r.created_at || '') + '" style="white-space:nowrap;color:var(--muted);font-size:12px">' + createdAt + '</td>';
+    html += '<td data-sort-value="' + esc(r.modified_at || '') + '" style="white-space:nowrap;color:var(--muted);font-size:12px">' + modifiedAt + '</td>';
+    html += '</tr>';
   }
   html += '</tbody></table></div>';
 
@@ -1045,13 +1181,13 @@ function renderSecrets() {
   }
   if (secrets.length === 0 && data.config.secrets.length === 0) {
     document.getElementById('secrets-body').innerHTML =
-      '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">&#x2795;</div>' +
+      '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">&#x2795;</div>' +
       '<h3>No secrets yet</h3><p>Click "+ Add Secret" to get started.</p></div></td></tr>';
     return;
   }
   if (secrets.length === 0) {
     document.getElementById('secrets-body').innerHTML =
-      '<tr><td colspan="5"><div class="empty-state"><p>No secrets match your filter.</p></div></td></tr>';
+      '<tr><td colspan="6"><div class="empty-state"><p>No secrets match your filter.</p></div></td></tr>';
     return;
   }
   var html = '';
@@ -1068,10 +1204,12 @@ function renderSecrets() {
     } else {
       badgesHtml = '<span style="color:var(--subtle)">&mdash;</span>';
     }
+    var addedAt = s.added_at ? formatDateShort(s.added_at) : '\\u2014';
     html += '<tr>' +
       '<td><span class="mono" style="font-weight:500">' + esc(s.name) + '</span></td>' +
       '<td class="mono">' + esc(s.env_name) + '</td>' +
       '<td>' + (s.description ? esc(s.description) : '<span style="color:var(--subtle)">&mdash;</span>') + '</td>' +
+      '<td data-sort-value="' + esc(s.added_at || '') + '" style="white-space:nowrap;color:var(--muted);font-size:12px">' + addedAt + '</td>' +
       '<td>' + badgesHtml + '</td>' +
       '<td><div class="btn-group">' +
       '<button class="btn btn-sm" onclick="showEditModal(\\''+esc(s.name)+'\\')">Edit</button>' +
@@ -1273,7 +1411,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    # ── Sync ──────────────────────────────────────────────
+    # -- Sync --------------------------------------------------
     def _handle_sync(self, body: dict) -> None:
         name = body.get("name")
         if name:
@@ -1289,7 +1427,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                         for r in report.results],
         })
 
-    # ── Add ───────────────────────────────────────────────
+    # -- Add ---------------------------------------------------
     def _handle_add(self, body: dict) -> None:
         name = body.get("name", "").strip()
         env = body.get("env", "").strip()
@@ -1325,7 +1463,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
 
         self._json_response({"ok": True})
 
-    # ── Edit ──────────────────────────────────────────────
+    # -- Edit --------------------------------------------------
     def _handle_edit(self, body: dict) -> None:
         name = body.get("name", "").strip()
         if not name:
@@ -1363,7 +1501,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         self.config.save(self.config_path)
         self._json_response({"ok": True})
 
-    # ── Delete ────────────────────────────────────────────
+    # -- Delete ------------------------------------------------
     def _handle_delete(self, body: dict) -> None:
         name = body.get("name", "")
         if not name:
@@ -1373,7 +1511,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         self.config.save(self.config_path)
         self._json_response({"ok": True, "results": report.ok_count})
 
-    # ── Rotate ────────────────────────────────────────────
+    # -- Rotate ------------------------------------------------
     def _handle_rotate(self, body: dict) -> None:
         name = body.get("name", "")
         value = body.get("value", "")
@@ -1404,7 +1542,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         else:
             self._json_response({"ok": True})
 
-    # ── Audit ─────────────────────────────────────────────
+    # -- Audit -------------------------------------------------
     def _handle_audit(self) -> None:
         entries = check_status(self.config)
         issues: list[str] = []
@@ -1416,7 +1554,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                     issues.append(f"{entry.env_name} -> {label}")
         self._json_response({"ok": len(issues) == 0, "issues": issues})
 
-    # ── Validate ──────────────────────────────────────────
+    # -- Validate ----------------------------------------------
     def _handle_validate(self) -> None:
         from .validate import validate_key
 
@@ -1444,7 +1582,6 @@ class SyncUIHandler(BaseHTTPRequestHandler):
 
     def _handle_validate_keychain(self) -> None:
         """Scan Keychain for known provider keys and validate them."""
-        import re
         import subprocess
 
         from .validate import validate_key, SERVICE_PATTERNS, should_exclude
@@ -1458,14 +1595,23 @@ class SyncUIHandler(BaseHTTPRequestHandler):
 
         svce_re = re.compile(r'"svce"<blob>="([^"]*)"')
         acct_re = re.compile(r'"acct"<blob>="([^"]*)"')
+        # Match cdat/mdat: hex encoding followed by human-readable datetime
+        # Format: "cdat"<timedate>=0x3230323...00  "20260209110438Z\000"
+        cdat_re = re.compile(r'"cdat"<timedate>=0x[0-9a-fA-F]+\s+"(\d{14}Z)\\000"')
+        mdat_re = re.compile(r'"mdat"<timedate>=0x[0-9a-fA-F]+\s+"(\d{14}Z)\\000"')
 
-        entries: list[tuple[str, str]] = []
+        entries: list[tuple[str, str, str, str]] = []  # (svce, acct, cdat, mdat)
         current_attrs: dict[str, str] = {}
         for line in result.stdout.splitlines():
             stripped = line.strip()
             if stripped.startswith("class:"):
                 if "svce" in current_attrs:
-                    entries.append((current_attrs.get("svce", ""), current_attrs.get("acct", "")))
+                    entries.append((
+                        current_attrs.get("svce", ""),
+                        current_attrs.get("acct", ""),
+                        current_attrs.get("cdat", ""),
+                        current_attrs.get("mdat", ""),
+                    ))
                 current_attrs = {}
                 continue
             m = svce_re.search(stripped)
@@ -1474,12 +1620,23 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             m = acct_re.search(stripped)
             if m:
                 current_attrs["acct"] = m.group(1)
+            m = cdat_re.search(stripped)
+            if m:
+                current_attrs["cdat"] = m.group(1)
+            m = mdat_re.search(stripped)
+            if m:
+                current_attrs["mdat"] = m.group(1)
         if "svce" in current_attrs:
-            entries.append((current_attrs.get("svce", ""), current_attrs.get("acct", "")))
+            entries.append((
+                current_attrs.get("svce", ""),
+                current_attrs.get("acct", ""),
+                current_attrs.get("cdat", ""),
+                current_attrs.get("mdat", ""),
+            ))
 
         results: list[dict] = []
         seen: set[str] = set()
-        for svc, acct in entries:
+        for svc, acct, cdat, mdat in entries:
             if not svc or svc in seen or should_exclude(svc):
                 continue
             svc_lower = svc.lower()
@@ -1496,14 +1653,16 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                             "name": svc,
                             "provider": vr.provider,
                             "valid": vr.valid,
-                "status": vr.status,
+                            "status": vr.status,
                             "message": vr.message,
+                            "created_at": _parse_keychain_date(cdat),
+                            "modified_at": _parse_keychain_date(mdat),
                         })
                     break
 
         self._json_response({"ok": True, "results": results})
 
-    # ── Export ────────────────────────────────────────────
+    # -- Export ------------------------------------------------
     def _handle_export(self, params: dict) -> None:
         fmt = (params.get("format", ["env"])[0]).strip()
         env_name = (params.get("env", [""])[0]).strip()
@@ -1543,7 +1702,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self._json_response({"error": f"Unknown format: {fmt}"})
             return
 
-        # SECURITY: Mask values in the preview — show only first 4 chars
+        # SECURITY: Mask values in the preview -- show only first 4 chars
         masked: dict[str, str] = {}
         for k, v in secrets.items():
             if v:
@@ -1567,7 +1726,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             "count": len(secrets),
         })
 
-    # ── Response helper ───────────────────────────────────
+    # -- Response helper ---------------------------------------
     def _json_response(self, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
@@ -1575,6 +1734,18 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def _parse_keychain_date(raw: str) -> str:
+    """Parse a Keychain timedate string like '20260209110438Z' to ISO format."""
+    if not raw:
+        return ""
+    try:
+        dt = datetime.strptime(raw, "%Y%m%d%H%M%SZ")
+        dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except (ValueError, TypeError):
+        return ""
 
 
 def _parse_targets(raw_targets: list, target_str: str = "") -> list[Target]:
