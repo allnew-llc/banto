@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.0.0 (2026-03-24)
+
+- **New: `banto sync` subpackage** — Multi-platform secret sync engine (ported from andon-for-llm-agents vault module)
+  - `banto sync init` — Create sync.json config
+  - `banto sync status` — Sync status matrix across all targets
+  - `banto sync push [name]` — Distribute secrets from Keychain to platforms
+  - `banto sync add` — Add new secret with target mappings
+  - `banto sync audit` — Drift detection across all targets
+  - `banto sync history <name>` — Version history with fingerprints
+  - `banto sync export` — Export in env/json/docker formats
+  - `banto sync ui` — Localhost-only web dashboard (stdlib only)
+- **New: 33 platform drivers** — Cloudflare Pages, Vercel, AWS SM/SSM, GCP, Azure Key Vault, Kubernetes, Docker Swarm, Heroku, Fly.io, Netlify, Render, Railway, Supabase, GitLab CI, GitHub Actions, CircleCI, Bitbucket, Terraform Cloud, Azure DevOps, Deno Deploy, Hasura Cloud, Laravel Forge, DigitalOcean, Alibaba KMS, Tencent SSM, Huawei CSMS, Naver Cloud, NHN Cloud, JD Cloud, Sakura Cloud, Volcengine KMS
+- **New: 4 notification integrations** — Slack, Microsoft Teams, Datadog Events, PagerDuty
+- **New: environment inheritance** — dev/stg/prd with chain resolution (child overrides parent, base always included)
+- **New: Keychain-native version history** — Rollback values stored in Keychain (not in JSON file). SHA-256 fingerprints, max 50 versions
+- **New: sync audit logging** — All operations logged to `~/.config/banto/sync-audit.log` (values never logged)
+- **New: sync config** — JSON-based `~/.config/banto/sync.json` (metadata only, no secret values)
+
+### Security
+
+- **Fixed: KeychainStore argv exposure** — `store()` now uses tmpfile (mode 0600, immediate deletion) instead of passing API key as `-w` argument. Key no longer visible in `ps aux`
+- **Keychain-native history** — Version rollback values stored directly in macOS Keychain. JSON history file contains only metadata (timestamp + fingerprint). Secret values never leave Keychain
+- Zero new dependencies (still stdlib-only)
+
+### Breaking Changes
+
+- `KeychainStore.store()` internal implementation changed (tmpfile instead of direct argv). Public API unchanged
+- Version bump to 3.0.0 due to scope expansion (sync subpackage adds ~4,300 LOC)
+
 ## 2.3.0 (2026-03-10)
 
 - **New: budget-based profile recommendation**: `CostGuard.recommend_profile()` returns "quality" (>50% remaining), "balanced" (>20%), or "budget" (<=20%). Displayed in `banto status` output
