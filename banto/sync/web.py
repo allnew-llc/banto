@@ -427,6 +427,7 @@ select { cursor: pointer; -webkit-appearance: none; appearance: none;
       <button class="btn btn-primary btn-sm" onclick="syncAll()">&#x2191; Sync All</button>
       <button class="btn btn-sm" onclick="auditAll()">&#x1f50d; Audit</button>
       <button class="btn btn-sm" onclick="validateAll()">&#x2713; Validate</button>
+      <button class="btn btn-sm" onclick="validateKeychain()">&#x1F511; Validate Keychain</button>
     </div>
     <div class="toolbar-spacer"></div>
   </div>
@@ -637,10 +638,43 @@ async function validateAll() {
     toast('No secrets to validate', 'info');
     return;
   }
-  var valid = r.results.filter(function(x) { return x.valid; }).length;
-  var invalid = r.results.filter(function(x) { return !x.valid; }).length;
+  showValidateResults('Sync Config Keys', r.results);
+}
+
+async function validateKeychain() {
+  toast('Scanning Keychain for known API keys...');
+  var r = await api('POST', '/api/validate-keychain');
+  if (!r.results || r.results.length === 0) {
+    toast('No known API keys found in Keychain', 'info');
+    return;
+  }
+  showValidateResults('Keychain Keys', r.results);
+}
+
+function showValidateResults(title, results) {
+  var valid = results.filter(function(x) { return x.valid; }).length;
+  var invalid = results.filter(function(x) { return !x.valid; }).length;
   if (invalid === 0) toast('Validate: all ' + valid + ' keys valid');
   else toast('Validate: ' + valid + ' valid, ' + invalid + ' invalid', 'fail');
+
+  var html = '<div class="card" style="margin-top:12px;">';
+  html += '<h3>' + esc(title) + ' — Validation Results</h3>';
+  html += '<table><thead><tr><th>Key</th><th>Provider</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var cls = r.valid ? 'ok' : 'fail';
+    var badge = r.valid ? '<span class="badge badge-ok">PASS</span>' : '<span class="badge badge-fail">FAIL</span>';
+    html += '<tr><td class="mono">' + esc(r.name) + '</td><td>' + esc(r.provider) + '</td><td>' + badge + '</td><td class="na">' + esc(r.message) + '</td></tr>';
+  }
+  html += '</tbody></table></div>';
+
+  var panel = document.getElementById('validate-results');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'validate-results';
+    document.getElementById('status').appendChild(panel);
+  }
+  panel.innerHTML = html;
 }
 
 async function deleteSecret(name) {
@@ -1227,6 +1261,8 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self._handle_audit()
         elif self.path == "/api/validate":
             self._handle_validate()
+        elif self.path == "/api/validate-keychain":
+            self._handle_validate_keychain()
         else:
             self.send_error(404)
 
@@ -1396,6 +1432,66 @@ class SyncUIHandler(BaseHTTPRequestHandler):
                 "valid": vr.valid,
                 "message": vr.message,
             })
+        self._json_response({"ok": True, "results": results})
+
+    def _handle_validate_keychain(self) -> None:
+        """Scan Keychain for known provider keys and validate them."""
+        import re
+        import subprocess
+
+        from .validate import validate_key, SERVICE_PATTERNS, should_exclude
+
+        result = subprocess.run(
+            ["security", "dump-keychain"], capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            self._json_response({"ok": False, "results": [], "error": "Keychain dump failed"})
+            return
+
+        svce_re = re.compile(r'"svce"<blob>="([^"]*)"')
+        acct_re = re.compile(r'"acct"<blob>="([^"]*)"')
+
+        entries: list[tuple[str, str]] = []
+        current_attrs: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("class:"):
+                if "svce" in current_attrs:
+                    entries.append((current_attrs.get("svce", ""), current_attrs.get("acct", "")))
+                current_attrs = {}
+                continue
+            m = svce_re.search(stripped)
+            if m:
+                current_attrs["svce"] = m.group(1)
+            m = acct_re.search(stripped)
+            if m:
+                current_attrs["acct"] = m.group(1)
+        if "svce" in current_attrs:
+            entries.append((current_attrs.get("svce", ""), current_attrs.get("acct", "")))
+
+        results: list[dict] = []
+        seen: set[str] = set()
+        for svc, acct in entries:
+            if not svc or svc in seen or should_exclude(svc):
+                continue
+            svc_lower = svc.lower()
+            for pattern in SERVICE_PATTERNS:
+                if pattern in svc_lower:
+                    seen.add(svc)
+                    val = subprocess.run(
+                        ["security", "find-generic-password", "-s", svc, "-w"],
+                        capture_output=True, text=True,
+                    ).stdout.strip()
+                    if val:
+                        vr = validate_key(svc, val)
+                        results.append({
+                            "name": svc,
+                            "provider": vr.provider,
+                            "valid": vr.valid,
+                            "message": vr.message,
+                        })
+                    break
+
         self._json_response({"ok": True, "results": results})
 
     # ── Export ────────────────────────────────────────────
