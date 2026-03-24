@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
+import re
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..keychain import KeychainStore
@@ -195,17 +199,46 @@ def cmd_sync_add(args: list[str]) -> None:
 
 
 def cmd_sync_audit(args: list[str]) -> None:
-    """Check drift across all targets."""
+    """Check drift across all targets. Optionally flag stale secrets."""
     config, _ = _load_config(args)
+
+    max_age_days = None
+    for i, a in enumerate(args):
+        if a == "--max-age-days" and i + 1 < len(args):
+            max_age_days = int(args[i + 1])
+
     entries = check_status(config)
     issues: list[str] = []
 
     for entry in entries:
         if not entry.keychain_exists:
-            issues.append(f"  MISSING in Keychain: {entry.env_name}")
+            issues.append(f"  DRIFT   {entry.env_name}: missing in Keychain")
         for label, status in entry.target_status.items():
             if status is False:
-                issues.append(f"  MISSING {entry.env_name} -> {label}")
+                issues.append(f"  DRIFT   {entry.env_name} -> {label}")
+
+    # Rotation age check
+    if max_age_days is not None:
+        history = HistoryStore()
+        now = datetime.now(timezone.utc)
+        for name in config.secrets:
+            versions = history.list_versions(name)
+            if not versions:
+                issues.append(f"  STALE   {name}: no version history (never rotated?)")
+                continue
+            latest = versions[-1]
+            try:
+                ts = datetime.fromisoformat(latest.timestamp)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age_days = (now - ts).days
+                if age_days > max_age_days:
+                    issues.append(
+                        f"  STALE   {name}: last rotated {age_days}d ago "
+                        f"(threshold: {max_age_days}d)"
+                    )
+            except (ValueError, TypeError):
+                issues.append(f"  STALE   {name}: unparseable timestamp in history")
 
     if issues:
         print(f"BANTO SYNC AUDIT — {len(issues)} issue(s) found:\n")
@@ -213,7 +246,10 @@ def cmd_sync_audit(args: list[str]) -> None:
             print(issue)
         sys.exit(1)
     else:
-        print("BANTO SYNC AUDIT — All secrets in sync.")
+        msg = "BANTO SYNC AUDIT — All secrets in sync."
+        if max_age_days is not None:
+            msg += f" No secrets older than {max_age_days} days."
+        print(msg)
 
 
 def cmd_sync_history(args: list[str]) -> None:
@@ -315,13 +351,210 @@ def cmd_sync_ui(args: list[str]) -> None:
     serve(config, port=port)
 
 
+def _resolve_new_value(args: list[str], name: str) -> str | None:
+    """Resolve a new secret value from --from-cli or interactive prompt."""
+    from_cli = None
+    for i, a in enumerate(args):
+        if a == "--from-cli" and i + 1 < len(args):
+            from_cli = args[i + 1]
+            break
+
+    if from_cli:
+        import shlex
+        try:
+            argv = shlex.split(from_cli)
+        except ValueError as e:
+            print(f"Error: Failed to parse command: {e}")
+            return None
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            print(f"Error: Command not found: {argv[0]}")
+            return None
+        except subprocess.TimeoutExpired:
+            print("Error: Command timed out (30s)")
+            return None
+        if result.returncode != 0:
+            print(f"Error: Command failed (exit {result.returncode})")
+            return None
+        value = result.stdout.strip()
+        if not value:
+            print("Error: Command produced empty output")
+            return None
+        return value
+
+    try:
+        value = getpass.getpass(f"Enter new value for {name}: ")
+        if not value:
+            print("Empty value. Cancelled.")
+            return None
+        return value
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted.")
+        return None
+
+
+def cmd_sync_rotate(args: list[str]) -> None:
+    """Rotate a secret — update Keychain + re-sync all targets."""
+    config, config_path = _load_config(args)
+
+    name = None
+    for a in args:
+        if not a.startswith("--"):
+            name = a
+            break
+
+    if not name:
+        print("Usage: banto sync rotate <name> [--from-cli '<command>']")
+        sys.exit(1)
+
+    entry = config.get_secret(name)
+    if entry is None:
+        print(f"Error: Secret '{name}' not found.")
+        sys.exit(1)
+
+    value = _resolve_new_value(args, name)
+    if value is None:
+        sys.exit(1)
+
+    # Update Keychain
+    kc = KeychainStore(service_prefix=config.keychain_service)
+    if not kc.store(entry.account, value):
+        print("Error: Failed to update Keychain.")
+        sys.exit(1)
+
+    # Record history
+    history = HistoryStore()
+    new_ver = history.record(name, value, config.keychain_service)
+    print(f"Rotated '{name}' (now v{new_ver.version})")
+
+    # Re-sync
+    if entry.targets:
+        print("Re-syncing to all targets...")
+        report = sync_secret(config, name)
+        _print_report(report)
+        if not report.all_ok:
+            sys.exit(1)
+
+
+def cmd_sync_run(args: list[str]) -> None:
+    """Run a command with sync secrets injected as environment variables."""
+    config, _ = _load_config(args)
+    kc = KeychainStore(service_prefix=config.keychain_service)
+
+    env_name = None
+    cmd_start = None
+    for i, a in enumerate(args):
+        if a == "--env" and i + 1 < len(args):
+            env_name = args[i + 1]
+        elif a == "--":
+            cmd_start = i + 1
+            break
+
+    if cmd_start is None or cmd_start >= len(args):
+        print("Usage: banto sync run [--env <env>] -- <command>")
+        sys.exit(1)
+
+    command = args[cmd_start:]
+
+    # Resolve secrets (with environment inheritance if specified)
+    if env_name:
+        resolved = config.resolve_environment(env_name)
+    else:
+        resolved = dict(config.secrets)
+
+    if not resolved:
+        print("No secrets configured.")
+        sys.exit(1)
+
+    # Build env with secrets from Keychain
+    env = os.environ.copy()
+    loaded = 0
+    for _name, entry in resolved.items():
+        val = kc.get(entry.account)
+        if val:
+            env[entry.env_name] = val
+            loaded += 1
+
+    result = subprocess.run(command, env=env)
+    sys.exit(result.returncode)
+
+
+def cmd_sync_import(args: list[str]) -> None:
+    """Import secrets from .env, .json, or .yaml file into Keychain + config."""
+    config, config_path = _load_config(args)
+
+    file_path = None
+    for a in args:
+        if not a.startswith("--"):
+            file_path = Path(a)
+            break
+
+    if file_path is None:
+        print("Usage: banto sync import <file>")
+        sys.exit(1)
+
+    if not file_path.exists():
+        print(f"Error: File not found: {file_path}")
+        sys.exit(1)
+
+    content = file_path.read_text(encoding="utf-8")
+    secrets: dict[str, str] = {}
+
+    ext = file_path.suffix.lower()
+    if ext == ".json":
+        secrets = json.loads(content)
+    else:
+        # .env format
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
+            if m:
+                key, val = m.group(1), m.group(2)
+                if (val.startswith('"') and val.endswith('"')) or \
+                   (val.startswith("'") and val.endswith("'")):
+                    val = val[1:-1]
+                secrets[key] = val
+
+    if not secrets:
+        print("No secrets found in file.")
+        sys.exit(1)
+
+    kc = KeychainStore(service_prefix=config.keychain_service)
+    history = HistoryStore()
+    count = 0
+
+    for env_var, value in secrets.items():
+        name = env_var.lower().replace("_", "-")
+        if config.get_secret(name):
+            print(f"  Skip: {name} (already exists)")
+            continue
+
+        if not kc.store(name, value):
+            print(f"  Error: Failed to store {name}")
+            continue
+
+        entry = SecretEntry(name=name, account=name, env_name=env_var)
+        config.add_secret(entry)
+        history.record(name, value, config.keychain_service)
+        count += 1
+
+    config.save(config_path)
+    print(f"Imported {count} secret(s) from {file_path.name}.")
+
+
 SYNC_COMMANDS = {
     "status": cmd_sync_status,
     "push": cmd_sync_push,
     "add": cmd_sync_add,
+    "rotate": cmd_sync_rotate,
     "audit": cmd_sync_audit,
     "history": cmd_sync_history,
+    "run": cmd_sync_run,
     "export": cmd_sync_export,
+    "import": cmd_sync_import,
     "init": cmd_sync_init,
     "ui": cmd_sync_ui,
 }
@@ -337,9 +570,12 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  status              Show sync status matrix")
         print("  push [name]         Sync secrets to targets")
         print("  add <name> ...      Add a new secret")
-        print("  audit               Check drift across targets")
+        print("  rotate <name>       Rotate a secret (update + re-sync)")
+        print("  audit [--max-age-days N]  Check drift + stale secrets")
         print("  history <name>      Show version history")
+        print("  run [--env E] -- <cmd>  Run command with secrets as env vars")
         print("  export [--format]   Export secrets (env/json/docker)")
+        print("  import <file>       Import from .env or .json file")
         print("  ui [--port N]       Launch local web UI")
         sys.exit(0)
 

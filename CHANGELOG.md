@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.0 (2026-03-24)
+
+- **New: `banto sync rotate`** — Rotate a secret interactively or via `--from-cli '<command>'`. Updates Keychain, records version history, re-syncs all targets
+- **New: `banto sync run`** — Inject secrets as environment variables and run a command (`banto sync run [--env prd] -- <cmd>`). Supports environment inheritance
+- **New: `banto sync import`** — Import secrets from `.env` or `.json` files. Auto-detect format, store in Keychain, add to config, record history. Skips duplicates
+- **New: `banto sync audit --max-age-days N`** — Flags secrets not rotated within threshold. Uses version history timestamps. Reports "STALE" alongside existing drift detection
+
 ## 3.0.0 (2026-03-24)
 
 - **New: `banto sync` subpackage** — Multi-platform secret sync engine (ported from andon-for-llm-agents vault module)
