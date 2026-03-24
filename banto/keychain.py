@@ -102,11 +102,12 @@ class KeychainStore:
     def store(self, provider: str, api_key: str) -> bool:
         """Store an API key in Keychain. Overwrites existing.
 
-        Note: The macOS ``security`` CLI requires the key as a command-line
-        argument (``-w <value>``), which is briefly visible in the process
-        table. This is a limitation of the ``security`` tool, not of banto.
-        The key is stored securely in Keychain once the command completes.
+        Uses a temporary file (mode 0600, deleted immediately) to avoid
+        exposing the API key in the process argument list.
         """
+        import contextlib
+        import tempfile
+
         service = self._service_name(provider)
         try:
             # Delete existing (ignore errors)
@@ -118,19 +119,26 @@ class KeychainStore:
                 ],
                 capture_output=True,
             )
-            # SECURITY NOTE: API key is briefly visible in process table via `ps aux`.
-            # macOS `security` CLI does not reliably support stdin for -w flag.
-            # See README.md Security > Threat Model for mitigation guidance.
-            result = subprocess.run(
-                [
-                    "security", "add-generic-password",
-                    "-s", service, "-a", self.account,
-                    "-w", api_key,
-                    self.keychain_path,
-                ],
-                capture_output=True,
-                text=True,
-            )
+            # Write key to temp file to avoid argv exposure (ps aux)
+            fd, tmp_path = tempfile.mkstemp(prefix="banto-kc-", suffix=".tmp")
+            try:
+                os.write(fd, api_key.encode("utf-8"))
+                os.close(fd)
+                os.chmod(tmp_path, 0o600)
+                result = subprocess.run(
+                    [
+                        "sh", "-c",
+                        'security add-generic-password'
+                        ' -s "$1" -a "$2" -w "$(cat "$3")" "$4"',
+                        "--", service, self.account, tmp_path,
+                        self.keychain_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
             return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
             return False
