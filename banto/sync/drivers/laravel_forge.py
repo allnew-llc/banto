@@ -86,9 +86,9 @@ class LaravelForgeDriver(PlatformDriver):
         payload = json.dumps({"content": new_content})
         fd, tmp_path = tempfile.mkstemp(prefix="banto-forge-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             result = subprocess.run(
                 ["curl", "-s", "-X", "PUT", "-K", "-",
                  "-d", f"@{tmp_path}",
@@ -125,9 +125,9 @@ class LaravelForgeDriver(PlatformDriver):
         payload = json.dumps({"content": "\n".join(new_lines)})
         fd, tmp_path = tempfile.mkstemp(prefix="banto-forge-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             result = subprocess.run(
                 ["curl", "-s", "-X", "PUT", "-K", "-",
                  "-d", f"@{tmp_path}",

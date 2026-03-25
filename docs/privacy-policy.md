@@ -26,6 +26,8 @@ When you explicitly run `sync push` or use the `banto_sync_push` tool, banto sen
 ### validate (User-Initiated)
 When you explicitly run `validate` or use the `banto_validate` / `banto_validate_keychain` tools, banto sends API keys to their respective provider endpoints (e.g., OpenAI, Anthropic, Google) to perform read-only health checks (typically GET requests to /v1/models or equivalent). No data beyond the API key header is sent.
 
+> **Note on Google Gemini**: For Google Gemini, the API key is sent as a URL query parameter (`?key=...`) as required by Google's API design. Unlike other providers where the key is sent in an HTTP header, URL query parameters may be logged by intermediate network infrastructure (proxies, CDNs, load balancers) even over TLS connections. This is a known limitation of Google's API authentication design.
+
 ### chatgpt connect (User-Initiated)
 When you run `banto chatgpt connect`, banto starts a local MCP server and exposes it via a third-party tunnel service (ngrok or Cloudflare Tunnel). During this session, the tunnel provider has access to the following **metadata** (not secret values):
 - Secret names (e.g., "openai", "github")
@@ -39,6 +41,15 @@ The tunnel provider may also log connection metadata (IP addresses, timestamps, 
 **Secret values are never included in MCP tool responses.** The tunnel URL contains a random capability token; only those with the URL can access the endpoint. The session ends when you stop the command (Ctrl+C).
 
 Do not use `banto chatgpt connect` if you cannot accept that the metadata listed above may transit external tunnel providers.
+
+### Notifications (User-Configured)
+When notification integrations are configured (Slack, Microsoft Teams, Datadog, PagerDuty), banto sends the following data to configured webhook endpoints on sync events:
+- Secret names involved in the operation
+- Target platform names
+- Operation result (success/failure)
+- Sync count metrics
+
+No secret values are included in notification payloads. Webhook URLs are stored locally in sync.json and are not transmitted to banto servers.
 
 All actions:
 - Are triggered only by explicit user or agent commands, never automatically.
@@ -126,6 +137,8 @@ bantoは自動的に第三者とデータを共有することはありません
 ### validate（ユーザー起動）
 `validate` コマンドまたは `banto_validate` / `banto_validate_keychain` ツールを明示的に実行すると、bantoは各APIキーをそれぞれのプロバイダーエンドポイント（OpenAI、Anthropic、Googleなど）に送信し、読み取り専用のヘルスチェック（通常は /v1/models 等へのGETリクエスト）を実行します。APIキーヘッダー以外のデータは送信されません。
 
+> **Google Geminiに関する注記**: Google Geminiの場合、APIキーはGoogleのAPI設計上の要件として、URLクエリパラメータ（`?key=...`）として送信されます。他のプロバイダーではキーはHTTPヘッダーで送信されますが、URLクエリパラメータはTLS接続下であっても中間のネットワークインフラ（プロキシ、CDN、ロードバランサー）によってログに記録される可能性があります。これはGoogleのAPI認証設計の既知の制約です。
+
 ### chatgpt connect（ユーザー起動）
 `banto chatgpt connect` を実行すると、bantoはローカルMCPサーバーを起動し、第三者のトンネルサービス（ngrokまたはCloudflare Tunnel）を経由して公開します。このセッション中、トンネルプロバイダーは以下の**メタデータ**（シークレット値ではありません）にアクセスできます:
 - シークレット名（例: "openai", "github"）
@@ -139,6 +152,15 @@ bantoは自動的に第三者とデータを共有することはありません
 **シークレット値はMCPツールレスポンスに含まれません。** トンネルURLにはランダムなケイパビリティトークンが含まれ、URLを知る者のみがアクセスできます。セッションはコマンドの停止（Ctrl+C）時に終了します。
 
 上記のメタデータが外部トンネルプロバイダーを通過することを受け入れられない場合は、`banto chatgpt connect` を使用しないでください。
+
+### 通知連携（ユーザー設定）
+通知連携（Slack、Microsoft Teams、Datadog、PagerDuty）が設定されている場合、bantoは同期イベント時に以下のデータを設定済みのwebhookエンドポイントに送信します:
+- 操作に関連するシークレット名
+- ターゲットプラットフォーム名
+- 操作結果（成功/失敗）
+- 同期件数メトリクス
+
+シークレット値は通知ペイロードに含まれません。Webhook URLは sync.json にローカル保存され、bantoサーバーには送信されません。
 
 いずれの操作も:
 - ユーザーまたはエージェントの明示的なコマンドによってのみ実行され、自動的には行われません。

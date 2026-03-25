@@ -1449,6 +1449,9 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             return
 
         length = int(self.headers.get("Content-Length", 0))
+        if length > 1_048_576:
+            self._reject(413, "Payload Too Large")
+            return
         body = json.loads(self.rfile.read(length)) if length else {}
 
         if self.path == "/api/sync":

@@ -132,9 +132,9 @@ class RenderDriver(PlatformDriver):
         payload = json.dumps(env_vars)
         fd, tmp_path = tempfile.mkstemp(prefix="banto-render-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             config_lines = (
                 f'-H "Authorization: Bearer {api_key}"\n'
                 f'-H "Content-Type: application/json"\n'

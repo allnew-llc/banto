@@ -14,7 +14,7 @@ Usage:
 """
 
 import json
-import socket
+import secrets
 import threading
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -366,9 +366,16 @@ def _build_html(provider_hint: str | None = None) -> str:
     submitBtn.textContent = "Storing...";
 
     try {{
+      const csrfResp = await fetch("/api/csrf-token");
+      const csrfData = await csrfResp.json();
+      const csrfToken = csrfData.token;
+
       const resp = await fetch("/register", {{
         method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
+        headers: {{
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        }},
         body: JSON.stringify({{
           provider: provider,
           env_name: envNameEl.value.trim(),
@@ -413,6 +420,24 @@ class _RegisterHandler(BaseHTTPRequestHandler):
     html_content: str = ""
     keychain: KeychainStore | None = None
     on_success: object = None  # callable or None
+    csrf_token: str = ""
+    server_port: int = 0
+
+    def _check_origin(self) -> bool:
+        """Reject POST requests from foreign origins (CSRF defense)."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True  # Same-origin requests may omit Origin
+        allowed = {
+            f"http://127.0.0.1:{self.server_port}",
+            f"http://localhost:{self.server_port}",
+        }
+        return origin in allowed
+
+    def _check_csrf(self) -> bool:
+        """Validate X-CSRF-Token header against session token."""
+        token = self.headers.get("X-CSRF-Token", "")
+        return token == self.csrf_token
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -424,6 +449,8 @@ class _RegisterHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/csrf-token":
+            self._json_response(200, {"token": self.csrf_token})
         else:
             self.send_error(404)
 
@@ -431,6 +458,22 @@ class _RegisterHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path != "/register":
             self.send_error(404)
+            return
+
+        # Origin check (CSRF defense)
+        if not self._check_origin():
+            self._json_response(403, {"ok": False, "error": "Forbidden: invalid origin"})
+            return
+
+        # Content-Type enforcement
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("application/json"):
+            self._json_response(415, {"ok": False, "error": "Unsupported Media Type: expected application/json"})
+            return
+
+        # CSRF token check
+        if not self._check_csrf():
+            self._json_response(403, {"ok": False, "error": "Forbidden: invalid or missing CSRF token"})
             return
 
         length = int(self.headers.get("Content-Length", 0))
@@ -461,8 +504,8 @@ class _RegisterHandler(BaseHTTPRequestHandler):
 
         try:
             provider = _validate_provider(provider)
-        except ValueError as e:
-            self._json_response(400, {"ok": False, "error": str(e)})
+        except ValueError:
+            self._json_response(400, {"ok": False, "error": "Invalid provider name. Use only letters, digits, hyphens, and underscores."})
             return
 
         keychain = self.__class__.keychain
@@ -516,12 +559,7 @@ def serve_register_popup(
     """
     html = _build_html(provider_hint)
     keychain = KeychainStore()
-
-    # Find a free port
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    csrf_token = secrets.token_urlsafe(32)
 
     # Build a handler class with our state
     class Handler(_RegisterHandler):
@@ -529,7 +567,14 @@ def serve_register_popup(
 
     Handler.keychain = keychain
 
-    server = HTTPServer(("127.0.0.1", port), Handler)
+    # Bind directly with port 0 to avoid TOCTOU race between
+    # finding a free port and actually binding to it.
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+
+    Handler.csrf_token = csrf_token
+    Handler.server_port = port
+
     url = f"http://127.0.0.1:{port}"
 
     done_event = threading.Event()

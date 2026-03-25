@@ -8,7 +8,9 @@ names and deployment targets.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -195,10 +197,13 @@ class SyncConfig:
             data["environments"] = {n: e.to_dict() for n, e in self.environments.items()}
         if self.default_environment:
             data["default_environment"] = self.default_environment
-        config_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        content = json.dumps(data, indent=2, ensure_ascii=False)
+        fd = os.open(str(config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            os.write(fd, content.encode("utf-8"))
+        finally:
+            os.close(fd)
 
     def add_secret(self, entry: SecretEntry) -> None:
         self.secrets[entry.name] = entry

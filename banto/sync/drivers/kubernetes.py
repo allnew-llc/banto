@@ -62,9 +62,9 @@ class KubernetesDriver(PlatformDriver):
         ns, secret_name = self._parse_project(project)
         fd, tmp_path = tempfile.mkstemp(prefix="banto-k8s-", suffix=".txt")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, value.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             # Generate YAML with --from-file (value in file, not argv)
             result = subprocess.run(
                 [

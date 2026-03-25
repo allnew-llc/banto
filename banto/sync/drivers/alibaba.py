@@ -35,10 +35,10 @@ def _write_secret_tempfile(value: str) -> str:
     """
     fd, path = tempfile.mkstemp(prefix="banto-secret-", suffix=".txt")
     try:
+        os.fchmod(fd, 0o600)
         os.write(fd, value.encode("utf-8"))
     finally:
         os.close(fd)
-    os.chmod(path, 0o600)
     return path
 
 
