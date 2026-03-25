@@ -836,6 +836,73 @@ def cmd_sync_validate(args: list[str]) -> None:
         print("  All testable keys valid.")
 
 
+def cmd_sync_setup(args: list[str]) -> None:
+    """Auto-detect env vars on a platform and match to Keychain entries."""
+    from .setup import run_setup
+
+    config, config_path = _load_config(args)
+    dry_run = "--dry-run" in args
+
+    # Parse platform:project
+    target = None
+    for a in args:
+        if ":" in a and not a.startswith("--"):
+            target = a
+            break
+
+    if not target:
+        print("Usage: banto sync setup <platform:project> [--dry-run] [--json]")
+        print("Example: banto sync setup vercel:allnew-corporate")
+        print("         banto sync setup cloudflare-pages:my-site --dry-run")
+        sys.exit(1)
+
+    platform, project = target.split(":", 1)
+
+    print(f"\nBANTO SYNC SETUP — {platform}:{project}\n")
+    if dry_run:
+        print("  (dry run — no changes will be made)\n")
+
+    matches = run_setup(
+        platform=platform, project=project,
+        config=config, config_path=config_path,
+        dry_run=dry_run,
+    )
+
+    if _is_json(args):
+        _json_out({
+            "platform": platform, "project": project, "dry_run": dry_run,
+            "matches": [
+                {"env_var": m.env_var, "keychain": m.keychain_service, "status": m.status}
+                for m in matches
+            ],
+        })
+        return
+
+    matched = [m for m in matches if m.status == "matched"]
+    missing = [m for m in matches if m.status == "missing"]
+    existing = [m for m in matches if m.status == "already_configured"]
+
+    for m in matched:
+        print(f"  MATCH  {m.env_var} -> {m.keychain_service}")
+    for m in existing:
+        print(f"  SKIP   {m.env_var} (already in sync.json)")
+    for m in missing:
+        print(f"  MISS   {m.env_var} (no Keychain match)")
+
+    print()
+    if matched and not dry_run:
+        print(f"  Registered {len(matched)} secret(s) in sync.json.")
+        print(f"  Run: banto sync push")
+    elif matched and dry_run:
+        print(f"  Would register {len(matched)} secret(s). Remove --dry-run to apply.")
+
+    if missing:
+        print(f"\n  {len(missing)} key(s) not found in Keychain:")
+        for m in missing:
+            name = m.env_var.lower().replace("_", "-")
+            print(f"    banto register {name}")
+
+
 SYNC_COMMANDS = {
     "status": cmd_sync_status,
     "push": cmd_sync_push,
@@ -848,6 +915,7 @@ SYNC_COMMANDS = {
     "export": cmd_sync_export,
     "import": cmd_sync_import,
     "init": cmd_sync_init,
+    "setup": cmd_sync_setup,
     "ui": cmd_sync_ui,
 }
 
@@ -858,6 +926,7 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("banto sync: Multi-platform secret sync\n")
         print("Usage: banto sync <command> [args]\n")
         print("Commands:")
+        print("  setup <plat:proj>   Auto-detect env vars + match Keychain (one command)")
         print("  init                Create default sync config")
         print("  status              Show sync status matrix")
         print("  validate            Test API keys against provider endpoints")
