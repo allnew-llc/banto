@@ -1,10 +1,8 @@
 [日本語](./README.ja.md)
 
 <p align="center">
-  <img src="docs/assets/app-icon.png" width="80" alt="banto icon">
+  <img src="docs/assets/logo.png" width="360" alt="banto — AI Budget Guard">
 </p>
-
-<h1 align="center">banto</h1>
 
 <p align="center">
   Local-first secret management for AI agents and developers.
@@ -29,45 +27,35 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 </p>
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#0D3B66', 'primaryTextColor': '#F2EFE9', 'primaryBorderColor': '#262626', 'lineColor': '#262626', 'secondaryColor': '#1a1a2e', 'tertiaryColor': '#0D3B66', 'fontSize': '13px', 'fontFamily': 'system-ui, sans-serif'}}}%%
-
-graph LR
-    subgraph Human ["Human · 人間"]
-        H["Browser Popup<br/>Terminal"]
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9', 'tertiaryColor': '#B13546'}}}%%
+graph TD
+    subgraph Users ["1. Human (Setup)"]
+        H[Human Developer] -->|2. Register Key| KC[(Keychain / Vault)]
+        KC -->|3. Read Key| C[banto Sync]
     end
 
-    subgraph Agent ["AI Agent"]
-        A["Claude Code<br/>ChatGPT"]
+    subgraph Agents ["4. Agent (Execution)"]
+        A[LLM Agent] -->|5. Need Budget| MCP[MCP Server]
+        MCP -->|6. Call banto| B
     end
 
-    subgraph Banto ["banto · 番頭"]
-        MCP["MCP Server<br/>10 tools"]
-        SYNC["Sync Engine<br/>33 drivers"]
-        BUDGET["Budget<br/><i>opt-in</i>"]
-        LEASE["Lease<br/><i>opt-in</i>"]
+    subgraph Banto_Guard ["7. banto (The Gatekeeper)"]
+        B{Hold Request}
+        B -->|Check| V[(Budget)]
+        B -->|Retrieve Key| C
+        D{Settle / Rollback}
+        D -->|Update| V
+        D -->|Audit| L[(Audit Log)]
     end
 
-    subgraph Storage ["Keychain"]
-        KC[("macOS Keychain<br/>Secure Enclave")]
+    subgraph Targets ["8. Targets (Sync)"]
+        C -->|Sync| T1[OpenAI]
+        C -->|Sync| T2[Anthropic]
+        C -->|Sync| T3[Vercel / AWS / +30]
     end
 
-    subgraph Targets ["Cloud · 33 Platforms"]
-        V["Vercel"]
-        CF["Cloudflare"]
-        AWS["AWS"]
-        MORE["..."]
-    end
-
-    H -- "secret values" --> KC
-    A -- "orchestrate" --> MCP
-    MCP --> SYNC
-    MCP -.-> BUDGET
-    MCP -.-> LEASE
-    KC -- "ctypes" --> SYNC
-    SYNC -- "stdin" --> V
-    SYNC -- "stdin" --> CF
-    SYNC -- "stdin" --> AWS
-    SYNC -- "stdin" --> MORE
+    A -->|9. Use API Key| T1
+    A -->|10. Report Usage| D
 ```
 
 ## Table of Contents
