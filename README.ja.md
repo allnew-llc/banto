@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  AIエージェントと開発者のための、ローカルファーストなシークレット管理プラットフォーム。
+  1コマンド。33プラットフォーム。必要な場所すべてに、あなたのシークレットを。
 </p>
 
 <p align="center">
@@ -20,50 +20,39 @@
 
 > **番頭**（banto） -- 江戸時代の商家において蔵の鍵と帳簿を預かり、主人の留守にも商いの秩序を守った筆頭番頭に由来します。
 
-bantoはmacOS Keychainを基盤とするローカルファーストのシークレット管理プラットフォームです。APIキーを安全に保管し、33のクラウドプラットフォームに同期。AIエージェントがすべてをオーケストレーションし、シークレット値に一切触れることはありません。
+bantoはmacOS KeychainのAPIキーを33のクラウドプラットフォームに1コマンドで同期します。ダッシュボードにシークレットをコピペする作業はもう不要。AIエージェントに _「Vercelにシークレットをデプロイして」_ と伝えるだけ。エージェントがオーケストレーションし、bantoが同期し、シークレット値がチャットに入ることはありません。オプションの予算ゲーティングで、その上にインテリジェントなコスト制御を追加できます。
 
 <p align="center">
   <img src="docs/assets/conceptual-flow.png" width="720" alt="banto conceptual flow">
 </p>
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'primaryColor': '#ffffff',
-    'primaryTextColor': '#262626',
-    'primaryBorderColor': '#262626',
-    'lineColor': '#262626',
-    'secondaryColor': '#0D3B66',
-    'tertiaryColor': '#F2EFE9'
-  }
-}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626' }}}%%
 graph LR
-    subgraph Setup ["User Space"]
-        H[Human] --- KC[(Keychain)]
+    subgraph Local ["Secure Origin"]
+        KC[(macOS Keychain)]
     end
 
-    subgraph Core ["banto Logic"]
+    subgraph Hub ["banto Engine"]
         B{{"banto"}}
+        V[Budget Logic]
     end
 
-    subgraph Agents ["Execution"]
-        A[AI Agent] --- M[MCP Server]
+    subgraph Cloud ["33+ Sync Targets"]
+        GH[GitHub]
+        VC[Vercel]
+        AWS[AWS Secrets]
+        GCP[GCP Secret Mgr]
+        ETC[...]
     end
 
-    subgraph Target ["Cloud"]
-        P[33+ Platforms]
-    end
-
-    H -.-> B
-    A --> M --> B
-    B --> KC
-    B --> P
-    A -.-> P
-
-    style B fill:#0D3B66,color:#fff,stroke:#0D3B66
-    style KC fill:#F2EFE9,stroke:#262626
-    style P fill:#F2EFE9,stroke:#262626
+    KC --> B
+    B -- "Validate & Guard" --> V
+    B ==> GH
+    B ==> VC
+    B ==> AWS
+    B ==> GCP
+    B ==> ETC
 ```
 
 ## 目次
@@ -84,12 +73,12 @@ graph LR
 
 ## 🔑 主な機能
 
-- **Keychainネイティブストレージ** — macOS Security frameworkへのctypes呼び出し。シークレット値はプロセス引数、一時ファイル、シェル展開のいずれにも現れません
-- **APIキー検証** — プッシュ前に6つのプロバイダエンドポイント（OpenAI、Anthropic、Gemini、GitHub、Cloudflare、xAI）に対してキーのヘルスチェックを実行
-- **ワンコマンドでプラットフォーム設定** — `banto sync setup vercel:my-project` で環境変数を自動検出し、Keychainエントリとマッチングして一発で設定完了
-- **AIエージェント連携** — ClaudeやChatGPTに _「Vercelにシークレットを同期して」_ と指示するだけ。エージェントがオーケストレーションし、人間はブラウザポップアップで値を入力。シークレット値がチャットに入ることはありません
-- **MCPサーバー** — Claude Code（stdio）およびChatGPT Connector（トンネル経由のHTTP/SSE）とのネイティブツール連携
-- **オプションの予算ゲーティング** — LLMコスト制御のためのホールド/精算パターン。グローバル、プロバイダ別、モデル別の上限設定に対応
+- **33+ プラットフォーム同期** — 1コマンドで Vercel、Cloudflare、AWS、GCP、Azure、Kubernetes、GitHub Actions など 33 以上にシークレットをデプロイ。ダッシュボード操作不要
+- **ワンコマンドセットアップ** — `banto sync setup vercel:my-project` で環境変数を自動検出し、Keychainエントリとマッチングして一発で設定完了
+- **AIエージェント連携** — ClaudeやChatGPTに _「Vercelにシークレットを同期して」_ と指示するだけ。エージェントがオーケストレーションし、値はブラウザポップアップで入力。チャットに値が入ることはありません
+- **プッシュ前検証** — 6つのプロバイダ（OpenAI、Anthropic、Gemini、GitHub、Cloudflare、xAI）に対してキーの有効性をチェックし、無効なキーの配信を防止
+- **ドリフト検出** — SHA-256フィンガープリントでKeychainの変更を追跡。`banto sync audit` でデプロイ済みシークレットの陳腐化を検知
+- **予算ガード** — オプションのホールド/精算パターンによるLLMコスト制御。予算なし=キーなし。グローバル、プロバイダ別、モデル別の上限設定
 - **動的リース** — TTL付きの短期クレデンシャルを取得し、期限切れ時に自動失効
 - **Webダッシュボード** — CSRF保護付きのlocalhost限定CRUDインターフェース（`banto sync ui`）
 - **フィンガープリントドリフト検出** — SHA-256フィンガープリントでKeychainの変更と最終プッシュを追跡。`banto sync audit` でドリフトを検知
@@ -186,40 +175,37 @@ pip install -e .
 pip install banto[mcp]
 ```
 
-### 2. 設定の初期化
+### 2. プラットフォームに同期 — 1コマンド
 
 ```bash
-banto init          # ~/.config/banto/config.json と pricing.json を作成
+banto sync setup vercel:my-project   # 環境変数を自動検出 + Keychainマッチ
+banto sync push                      # 全ターゲットにデプロイ
 ```
 
-### 3. APIキーの登録
-
-```bash
-banto register openai    # ブラウザポップアップが開きます — そこでキーを入力
-```
-
-ターミナルで入力する場合:
-
-```bash
-banto store openai       # マスクされたプロンプトにキーを貼り付け
-```
-
-### 4. クラウドプラットフォームへの同期
-
-```bash
-banto sync setup vercel:my-project   # 環境変数を自動検出 + Keychainマッチ → 完了
-banto sync push                      # 全ターゲットにプッシュ
-```
+これだけ。bantoがKeychainのキーを見つけ、環境変数にマッピングし、プッシュします。
 
 またはAIエージェントに依頼:
 
 > _「Vercel の my-project にシークレットを同期して」_
->
-> エージェントが `banto_sync_setup` + `banto_sync_push` を実行。シークレットをチャットに貼り付ける必要はありません。
 
-### 5. （オプション）予算の設定
+### 3. キーの登録（Keychainに未登録の場合）
 
 ```bash
+banto register openai    # ブラウザポップアップが開く — そこでキーを入力
+banto store openai       # またはターミナルのマスクプロンプトで入力
+```
+
+### 4. プッシュ前に検証
+
+```bash
+banto sync validate --keychain       # 全キーをプロバイダAPIでテスト
+banto sync push --validate           # 検証 + プッシュを一括実行
+```
+
+### 5. （オプション）予算制御を追加
+
+```bash
+banto init                           # 予算設定ファイルを作成
 banto budget 100                     # グローバル月次上限 $100
 banto budget --provider openai 30    # OpenAI $30/月
 ```
