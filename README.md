@@ -20,42 +20,21 @@
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
-banto is a local-first secret management platform built on macOS Keychain. The core stores API keys in Keychain (via ctypes, no argv exposure) and syncs them to 33 cloud platforms. Optional modules add budget gating (hold/settle cost control) and dynamic leases (short-lived credentials with TTL). An MCP server integrates with Claude Code and ChatGPT so AI agents can orchestrate secrets without ever seeing the values.
+banto is a local-first secret management platform built on macOS Keychain. Store API keys securely, sync them to 33 cloud platforms, and let AI agents orchestrate everything — without ever seeing the values.
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="banto architecture diagram" width="800">
+  <img src="docs/assets/conceptual-flow.png" width="720" alt="banto conceptual flow">
 </p>
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9', 'tertiaryColor': '#B13546'}}}%%
-graph TD
-    subgraph Users ["1. Human (Setup)"]
-        H[Human Developer] -->|2. Register Key| KC[(Keychain / Vault)]
-        KC -->|3. Read Key| C[banto Sync]
-    end
-
-    subgraph Agents ["4. Agent (Execution)"]
-        A[LLM Agent] -->|5. Need Budget| MCP[MCP Server]
-        MCP -->|6. Call banto| B
-    end
-
-    subgraph Banto_Guard ["7. banto (The Gatekeeper)"]
-        B{Hold Request}
-        B -->|Check| V[(Budget)]
-        B -->|Retrieve Key| C
-        D{Settle / Rollback}
-        D -->|Update| V
-        D -->|Audit| L[(Audit Log)]
-    end
-
-    subgraph Targets ["8. Targets (Sync)"]
-        C -->|Sync| T1[OpenAI]
-        C -->|Sync| T2[Anthropic]
-        C -->|Sync| T3[Vercel / AWS / +30]
-    end
-
-    A -->|9. Use API Key| T1
-    A -->|10. Report Usage| D
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9'}}}%%
+graph LR
+    H["👤 Human"] -->|register key| B["🏮 banto"]
+    A["🤖 Agent"] -->|orchestrate| B
+    B -->|store| K[("🔑 Keychain")]
+    B -->|sync| T["☁️ 33 Platforms"]
+    B -->|gate| BG["💰 Budget"]
+    A -->|use key| T
 ```
 
 ## Table of Contents
