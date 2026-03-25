@@ -1,30 +1,54 @@
 [English](./README.md)
 
-# banto
+<p align="center">
+  <img src="docs/assets/app-icon.png" width="80" alt="banto icon">
+</p>
 
-ローカルファーストのシークレット管理ツールです。APIキーは安全なバックエンド（デフォルト: macOS Keychain、1Password等に差し替え可能）に格納し、33のクラウドプラットフォームに同期できます。オプションの予算モードではLLMコスト制御を追加可能。注意: 一部のコマンド（`sync run`, `sync export`）は相互運用のため意図的にシークレットを環境変数やstdoutに出力します。
+<h1 align="center">banto</h1>
+
+<p align="center">
+  AIエージェントと開発者のための、ローカルファーストなシークレット管理プラットフォーム。
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-5.1.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python">
+  <img src="https://img.shields.io/badge/license-Dual%20(Personal%20%2F%20Commercial)-green" alt="license">
+  <img src="https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen" alt="dependencies">
+</p>
 
 > **番頭**（bantō）── 江戸時代の商家において蔵の鍵と帳簿を預かり、主人の留守にも商いの秩序を守った筆頭番頭に由来します。
 
-## 課題
-
-多くのプロジェクトでは、APIキーを `.env` ファイルや環境変数に保管しています。この場合、同一ユーザーで実行されるプロセスからキーを読み取れるため、エージェントが予算チェックの例外を無視してAPIを呼び続ける可能性があります。エージェントが想定外に稼働した結果、高額な請求が発生するリスクがあります。
-
-## 解決策
-
-bantoは予算制御を**構造的**に実現します。APIキーはmacOS Keychainに格納され、bantoのAPIを通じて予算の範囲内でのみ返却されます。予算超過時はキーそのものが取得不能になるため、APIコールが成立しません。
+bantoはmacOS Keychainを基盤とするローカルファーストのシークレット管理プラットフォームです。コア機能はAPIキーをKeychain（ctypes経由、argv露出なし）に格納し、33のクラウドプラットフォームに同期します。オプションモジュールとして、予算ゲーティング（ホールド/精算によるコスト制御）と動的リース（TTL付き短期クレデンシャル）を提供します。MCPサーバーによりClaude CodeやChatGPTと連携し、AIエージェントがシークレット値に一切触れることなくシークレット管理を行えます。
 
 <p align="center">
   <img src="docs/architecture.svg" alt="bantoアーキテクチャ図" width="800">
 </p>
 
+## 主な機能
+
+- **Keychainネイティブストレージ** — macOS Security frameworkへのctypes呼び出し。シークレット値はプロセス引数、一時ファイル、シェル展開のいずれにも現れません
+- **33プラットフォーム同期ドライバ** — Cloudflare、Vercel、AWS、GCP、Azure、Kubernetes、Docker、Heroku、Fly.io、Netlify、Render、Railway、Supabase、GitLab、GitHub Actions、CircleCI、Bitbucket、Terraform Cloud、Azure DevOps、Deno Deploy、Hasura、Laravel Forge、DigitalOcean、Alibaba、Tencent、Huawei、Naver、NHN、JD Cloud、Sakura、Volcengineなど
+- **APIキー検証** — プッシュ前に6つのプロバイダエンドポイント（OpenAI、Anthropic、Gemini、GitHub、Cloudflare、xAI）に対してキーのヘルスチェックを実行
+- **MCPサーバー** — Claude Code（stdio）およびChatGPT Connector（トンネル経由のHTTP/SSE）とのネイティブツール連携
+- **ブラウザポップアップによるキー登録** — エージェントが `banto register` を呼び出し、人間がlocalhostブラウザポップアップで値を入力。エージェントがシークレット値を見ることはありません
+- **オプションの予算ゲーティング** — LLMコスト制御のためのホールド/精算パターン。グローバル、プロバイダ別、モデル別の上限設定に対応
+- **動的リース** — TTL付きの短期クレデンシャルを取得し、期限切れ時に自動失効
+- **Webダッシュボード** — CSRF保護付きのlocalhost限定CRUDインターフェース（`banto sync ui`）
+- **フィンガープリントドリフト検出** — SHA-256フィンガープリントでKeychainの変更と最終プッシュを追跡。`banto sync audit` でドリフトを検知
+- **全コマンドで `--json` 出力** — エージェントやCI連携のための機械可読出力
+- **通知連携** — Slack、Microsoft Teams、Datadog Events、PagerDuty
+- **ランタイム依存ゼロ** — 標準ライブラリのみ（ctypesは標準ライブラリの一部）。MCPサーバーにはオプションの `mcp` パッケージが必要
+
 ## 動作要件
 
-- macOS（Keychainによるシークレット管理）
+- macOS（シークレット管理にKeychainを使用）
 - Python 3.10+
-- 外部依存なし
+- 外部依存なし（MCPサーバー: `pip install banto[mcp]`）
 
-## インストール
+## クイックスタート
+
+### 1. インストール
 
 ```bash
 pip install banto
@@ -38,80 +62,184 @@ cd banto
 pip install -e .
 ```
 
-## クイックスタート
-
-### 1. 設定の初期化
+### 2. 設定の初期化
 
 ```bash
-banto init    # デフォルト設定を ~/.config/banto/ に配置
+banto init          # ~/.config/banto/config.json と pricing.json を作成
 ```
-
-### 2. 月次予算の設定
-
-デフォルトの予算上限は **$0（米ドル）** です。ご自身で予算を設定してください。予算が $0 のままだと、すべてのAPIキー取得がブロックされます。
-
-```bash
-banto budget 50    # グローバル月次上限を $50 USD に設定
-```
-
-すべての予算は**米ドル（USD）**建てで、**暦月**単位で管理されます。毎月1日に自動リセットされます。
 
 ### 3. APIキーの登録
 
-使用するプロバイダごとに `banto store <provider>` を実行し、APIキーをmacOS Keychainに登録します。キーの入力はマスクされ、画面に表示されません。
-
-```
-$ banto store openai
-Enter API key for 'openai':    ← ここにキーを貼り付けます（入力は非表示）
-Stored 'openai' in Keychain.
+```bash
+banto register openai    # ブラウザポップアップが開きます — そこでキーを入力
 ```
 
-すでにキーが登録されている場合は、上書きするかどうか確認されます。
-
-```
-$ banto store openai
-Key for 'openai' already exists. Overwrite? (y/N): y
-Enter API key for 'openai':
-Stored 'openai' in Keychain.
-```
-
-APIキーは各プロバイダのダッシュボードから取得できます。
-
-- **OpenAI**: https://platform.openai.com/api-keys
-- **Google**: https://aistudio.google.com/apikey
-- **Anthropic**: https://console.anthropic.com/settings/keys
-
-使用するプロバイダごとに繰り返します。
+ターミナルで入力する場合:
 
 ```bash
-banto store openai
-banto store google
-banto store anthropic
+banto store openai       # マスクされたプロンプトにキーを貼り付け
 ```
 
-### 4. コードへの組み込み
+### 4. クラウドプラットフォームへの同期
+
+```bash
+banto sync init                      # sync.json を作成
+banto sync add openai --env OPENAI_API_KEY --target vercel:my-project
+banto sync push                      # 全ターゲットにプッシュ
+```
+
+### 5. （オプション）予算の設定
+
+```bash
+banto budget 100                     # グローバル月次上限 $100
+banto budget --provider openai 30    # OpenAI $30/月
+```
+
+## CLIリファレンス
+
+### コアコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `banto status` | 予算状況の表示（プロバイダ別・モデル別の内訳付き） |
+| `banto budget [amount]` | 予算上限の表示・設定（グローバル、プロバイダ別、モデル別） |
+| `banto profile [name]` | アクティブなモデルプロファイルの表示・設定（quality/balanced/budget） |
+| `banto store <provider>` | APIキーをKeychainに登録（ターミナルプロンプト） |
+| `banto register [provider]` | ブラウザポップアップを開いてAPIキーを登録 |
+| `banto delete <provider>` | APIキーをKeychainから削除 |
+| `banto list` | 登録済みキーと予算の一覧 |
+| `banto check <model> ...` | コスト見積もりのドライラン（`--tokens`、`--n`、`--seconds`、`--quality`、`--size`） |
+| `banto init` | デフォルト設定を `~/.config/banto/` にコピー |
+
+### Syncコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `banto sync init` | デフォルトの `sync.json` を作成 |
+| `banto sync status` | 同期ステータスマトリクス（シークレット x ターゲット） |
+| `banto sync push [name]` | Keychainからターゲットにシークレットをプッシュ（`--validate` でプッシュ前チェック） |
+| `banto sync add <name>` | 新規シークレットの追加（`--env`、`--target platform:project`） |
+| `banto sync rotate <name>` | シークレットの対話的ローテーション、または `--from-cli '<command>'` で自動化 |
+| `banto sync audit` | ドリフト検出: 存在確認、フィンガープリント、ファイル不一致、陳腐化（`--max-age-days N`） |
+| `banto sync validate` | プロバイダエンドポイントに対するキー検証（`--keychain`、`--dry-run`） |
+| `banto sync history <name>` | フィンガープリント付きのバージョン履歴を表示 |
+| `banto sync run [--env E] -- <cmd>` | シークレットを環境変数として注入してコマンドを実行 |
+| `banto sync export` | シークレットをenv/json/docker形式でエクスポート（`--format`、`--env`） |
+| `banto sync import <file>` | `.env` または `.json` ファイルからシークレットをインポート |
+| `banto sync ui [--port N]` | localhost Webダッシュボードを起動（デフォルトポート 8384） |
+
+### Leaseコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `banto lease acquire <name>` | 短期クレデンシャルの取得（`--cmd`、`--revoke-cmd`、`--ttl`） |
+| `banto lease get <lease_id>` | クレデンシャル値の取得（stdout、パイプ用） |
+| `banto lease revoke <lease_id>` | リースの明示的な失効 |
+| `banto lease list` | アクティブなリースと残りTTLの一覧 |
+| `banto lease cleanup` | 期限切れリースの一括失効 |
+
+### ChatGPTコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `banto chatgpt connect` | MCP HTTPサーバー + トンネルを起動し、ChatGPT Connector URLを表示（`--ngrok` または `--cloudflared`） |
+
+すべてのコマンドで `--json` オプションによる機械可読出力に対応しています。
+
+## MCPサーバー
+
+bantoはMCPサーバーを公開し、AIエージェントがシークレット管理を行えるようにします。エージェントがシークレット値を受け取ることはありません — すべてのツールはメタデータのみを返します。
+
+### Claude Code
+
+`.mcp.json` に以下を追加:
+
+```json
+{
+  "mcpServers": {
+    "banto": {
+      "command": "banto-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+オプションのMCP依存パッケージが必要です:
+
+```bash
+pip install banto[mcp]
+```
+
+### ChatGPT
+
+```bash
+banto chatgpt connect
+```
+
+MCPサーバーをHTTPモードで起動し、トンネル（ngrokまたはcloudflared）を開いて、ケイパビリティトークン付きのセキュアなConnector URLを表示します。このURLをChatGPTのConnector設定に貼り付けてください。
+
+### トランスポートモード
+
+```bash
+banto-mcp                              # stdio (Claude Code)
+banto-mcp --transport sse --port 8385  # SSE (dev)
+banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
+```
+
+### 利用可能なツール
+
+| ツール | 用途 | 備考 |
+|--------|------|------|
+| `banto_sync_status` | 同期マトリクスの表示（シークレット x ターゲット） | 読み取り専用 |
+| `banto_sync_push` | クラウドターゲットへのシークレットプッシュ | クラウド状態を変更 |
+| `banto_sync_audit` | ドリフトと陳腐化のチェック | 読み取り専用 |
+| `banto_validate` | sync.json内のキー検証 | プロバイダAPIにキーを送信 |
+| `banto_validate_keychain` | 全Keychainキーのスキャン + 検証 | プロバイダAPIにキーを送信 |
+| `banto_budget_status` | 予算内訳の表示 | 読み取り専用 |
+| `banto_register_key` | キー入力用ブラウザポップアップを起動 | 人間が値を入力 |
+| `banto_lease_list` | アクティブなリースの一覧 | 読み取り専用 |
+| `banto_lease_cleanup` | 期限切れリースの失効 | Keychainを変更 |
+
+すべてのツールにOpenAI互換アノテーション（`readOnlyHint`、`destructiveHint`、`openWorldHint`）が含まれます。
+
+## セキュリティ
+
+- **ctypes Keychainアクセス** — `store()` と `get()` はmacOS Security frameworkを直接呼び出します（SecKeychainAddGenericPassword / SecKeychainFindGenericPassword）。subprocess不使用、argv露出なし
+- **stdin経由のsyncドライバ** — 33のドライバすべてがstdinパイプ、tempfile（0600）、または `curl -K -` / `-d @file` でシークレットを渡します。シークレット値がプロセス引数に現れることはありません
+- **Web UIのCSRF保護** — セッションごとのトークンがすべてのPOSTエンドポイントで必須、Originヘッダー検証、Content-Type強制
+- **ChatGPT用ケイパビリティURL** — `banto chatgpt connect` がランダムなパストークンを生成。URLがベアラクレデンシャルとなります
+- **フェイルクローズド履歴** — Keychainへの書き込みが失敗した場合、`record()` は `None` を返します。壊れたバージョンのメタデータは保存されません
+- **ブラウザ登録ポップアップ** — localhost限定（127.0.0.1）、ランダムポート、使い捨て。値がエコーバックされることはありません
+- **検証はopt-in** — `banto sync validate --keychain` には明示的なフラグが必要。`--dry-run` も利用可能
+- **リースクレデンシャルの分離** — リース値はKeychainに保持。`lease-state.json` にはメタデータのみ
+
+### 脅威モデル
+
+bantoはbantoのAPIを通じてのみキーにアクセスするエージェントに対して有効です。直接シェルアクセスを持つエージェントはmacOS Keychainに独自に問い合わせることが可能です。多層防御として、エージェントランタイム側でシェルアクセスを制限することを推奨します。
+
+`sync export` と `sync run` は相互運用のため意図的にシークレットを環境変数やstdoutに出力します。エージェントコンテキストではこれらを使用しないでください。
+
+## Python API
+
+### 予算ゲーティングあり
 
 ```python
 from banto import SecureVault, BudgetExceededError, KeyNotFoundError
 
-vault = SecureVault(caller="my_app")
+vault = SecureVault(caller="my_app", budget=True)
 
 try:
-    # 予算ホールド + キー取得（見積もりコストを予約してからキーを返す）
     key = vault.get_key(
         model="gpt-4o",
         input_tokens=1000,
         output_tokens=500,
     )
-
-    # キーを使用してAPIを呼ぶ
     response = openai.chat.completions.create(
         model="gpt-4o",
         messages=[...],
         api_key=key,
     )
-
-    # 実コストで精算（余剰予算が解放される）
     vault.record_usage(
         model="gpt-4o",
         input_tokens=response.usage.prompt_tokens,
@@ -119,171 +247,45 @@ try:
         provider="openai",
         operation="chat",
     )
-
 except BudgetExceededError as e:
     print(f"予算超過: 残り${e.remaining:.2f} / 上限${e.limit:.2f}")
-
 except KeyNotFoundError as e:
     print(f"キー未登録: banto store {e.provider}")
 ```
 
-## CLI
+### 予算なし（キー管理 + 同期のみ）
 
-```bash
-banto status              # 予算状況の表示（プロバイダ別・モデル別の内訳付き）
-banto budget [args]       # 予算上限の表示・設定
-banto store <provider>    # APIキーをKeychainに登録
-banto delete <provider>   # APIキーをKeychainから削除
-banto list                # 登録済みキーと予算の一覧
-banto check <model> ...   # コスト見積もり（ドライラン）
-banto init                # ユーザー設定の初期化
+```python
+from banto import SecureVault
+
+vault = SecureVault(caller="my_app", budget=False)
+key = vault.get_key(provider="openai")
+# キーを直接使用 — コスト追跡なし
 ```
 
-### 予算管理
+### 自動検出モード（デフォルト）
 
-```bash
-# 全上限の表示
-banto budget
-
-# グローバル月次上限の設定
-banto budget 100
-
-# プロバイダ別上限の設定
-banto budget --provider openai 30
-
-# モデル別上限の設定
-banto budget --model dall-e-3 10
-
-# 上限の削除
-banto budget --provider openai --remove
+```python
+vault = SecureVault(caller="my_app")
+# budget=None: 設定から自動検出
+# monthly_limit_usd > 0 の場合は有効、それ以外は無効
 ```
 
-### コスト見積もりの例
+### CostGuard（シークレットストレージなしの予算追跡）
 
-```bash
-# トークン課金モデル
-banto check gpt-4o --tokens 1000 500
+```python
+from banto import CostGuard
 
-# 画像生成
-banto check dall-e-3 --n 4 --quality hd --size 1024x1024
-
-# 動画生成
-banto check sora-2 --seconds 10
+guard = CostGuard(caller="my_mcp")
+hold_id = guard.hold_budget(model="dall-e-3", provider="openai",
+                            n=1, quality="standard", size="1024x1024")
+# ... APIコール ...
+guard.settle_hold(hold_id, model="dall-e-3", n=1, provider="openai", operation="image")
 ```
-
-## 設定
-
-デフォルト設定は `~/.config/banto/` に配置されます。`banto init` で `config.json`（予算設定）と `pricing.json`（料金テーブル）の2ファイルが作成されます。
-
-### 予算上限
-
-すべての予算は**米ドル（USD）**建てで、**暦月**単位で管理されます。デフォルトは `0` です。ご自身で予算上限を設定してください。
-
-```json
-{
-  "monthly_limit_usd": 0
-}
-```
-
-### プロバイダ・モデル対応表
-
-モデル名からプロバイダを自動解決し、適切なKeychainエントリを参照します:
-
-```json
-{
-  "providers": {
-    "openai": {
-      "models": ["gpt-4o", "dall-e-3", "sora-2"]
-    },
-    "google": {
-      "models": ["gemini-3-pro-image-preview", "imagen-4.0-generate-001"]
-    }
-  }
-}
-```
-
-### 料金設定（`pricing.json`）
-
-料金テーブルは予算設定とは**別ファイル**（`~/.config/banto/pricing.json`）で管理されます。2026年3月時点のOpenAI・Anthropic・Googleの主要モデルの料金がサンプルとして同梱されています。
-
-> **料金は静的であり、正確性は保証されません。** bantoはプロバイダのAPIから実行時に料金を取得しません。主要プロバイダ（OpenAI、Anthropic、xAI）はモデル単価を返す公開APIを提供していないためです。各プロバイダの公式料金ページで最新の料金を確認し、`pricing.json` を更新してください。料金テーブルの不正確さに起因する損害について、AllNew LLCは一切の責任を負いません。
-
-プロバイダが料金を改定した場合は、`~/.config/banto/pricing.json` を編集してください。新しいモデルを追加する場合は、`config.json` の `providers`（キー解決用）と `pricing.json`（コスト算定用）の両方にエントリを追加します。
-
-3種類の課金体系に対応しています:
-
-```json
-{
-  "gpt-4o": {
-    "type": "per_token",
-    "input_per_1k": 0.0025,
-    "output_per_1k": 0.01
-  },
-  "dall-e-3": {
-    "type": "per_image",
-    "variants": {
-      "standard_1024x1024": 0.040,
-      "hd_1024x1024": 0.080
-    },
-    "fallback": 0.120
-  },
-  "sora-2": {
-    "type": "per_second",
-    "rate": 0.10
-  }
-}
-```
-
-## 仕組み
-
-### ホールド/精算パターン（Hold/Settle）
-
-bantoは**悲観的予約**（ペシミスティックリザベーション）パターンで予算を管理します:
-
-1. **ホールド**: `get_key()` は見積もりコストを使用量ログに予約エントリとして書き込んでからキーを返します。予約額は即座に予算から差し引かれます。
-2. **精算**: `record_usage()` は対応するホールドを検索し、実コストで置き換えます。見積もり > 実コストの場合、差額の予算が解放されます。
-3. **安全側バイアス**: `record_usage()` が呼ばれなかった場合（クラッシュ、タイムアウト等）、ホールド分はそのまま残ります。予算が暗黙的に漏れることはありません。
-
-このパターンにより、`get_key()` でキーを取得した後にコスト記録をスキップする、というメータリングギャップが解消されます。
-
-### 多段階予算制御
-
-`get_key()` 呼び出し時に3層のチェックを行います（すべて通過する必要があります）:
-
-1. **グローバル上限**: 全プロバイダ・全モデル合算の月次上限
-2. **プロバイダ上限**: プロバイダ単位のキャップ（例: OpenAI $30/月）
-3. **モデル上限**: モデル単位のキャップ（例: DALL-E 3 $10/月）
-
-### 使用量追跡
-
-- 使用量は `~/.config/banto/data/usage_YYYY_MM.json` にコールごとに記録されます
-- 月が変わると新しいファイルが作成され、予算が自動リセットされます
-- 合計値はファイル読み込みのたびにエントリから再計算されるため、値のドリフトが発生しません
-- `fcntl` によるファイルロック（排他ロックによるアトミックな読み書き）でプロセス間の排他制御を行います
-
-### Keychainストレージ
-
-- キーはログインKeychainにジェネリックパスワードとして格納されます
-- サービス名の形式: `banto-<provider>`（例: `banto-openai`）
-- macOS Security frameworkをctypes経由で直接呼び出し — シークレット値はプロセス引数に一切載りません
-- `sync export` と `sync run` は相互運用のため意図的に値を出力/注入します
-- `sync validate --keychain` はプロバイダーAPIへキーを送信してヘルスチェックを行います（opt-in のみ）
-
-### アトミックな get_key()
-
-`get_key()` は3つの操作を順に実行します:
-
-1. 見積もりコストが残予算（グローバル + プロバイダ + モデル）に収まるかチェック
-2. そのコストを使用量ログにホールドエントリとして書き込み
-3. Keychainからキーを取得
-
-ステップ1が失敗した場合、ステップ2-3は実行されません。予算超過時は、bantoのAPIのみを使用するエージェントがキーを取得する手段はありません。
-
-> **脅威モデルについて**: bantoは `get_key()` を経由してキーにアクセスするエージェントに対して有効です。シェルアクセスを持つエージェントがmacOS Keychainに直接問い合わせた場合、この制御を迂回できます。多層防御として、エージェントランタイム側でシェルアクセスを制限することを推奨します。
 
 ## カスタムバックエンド
 
-シークレットの保管先は `SecretBackend` プロトコルにより差し替え可能です。`get`、`store`、`delete`、`exists`、`list_providers` メソッドを持つ任意のオブジェクトが使用できます。継承は不要です（構造的部分型）。
+シークレットの保管先は `SecretBackend` プロトコルにより差し替え可能です。`get`、`store`、`delete`、`exists`、`list_providers` メソッドを持つ任意のオブジェクトが使用できます。継承は不要です。
 
 ### 環境変数
 
@@ -379,72 +381,73 @@ vault = SecureVault(
 
 完全な実装例は [examples/06_custom_backend.py](./examples/06_custom_backend.py) を参照してください。
 
-## 詳細な使い方
+## 設定
 
-### カスタムKeychainプレフィックス
+すべての設定ファイルは `~/.config/banto/` に配置されます。`banto init` でデフォルトが作成されます。
 
-既存のプレフィックスでキーが登録済みの場合:
+### `config.json` — 予算とプロバイダ設定
 
-```python
-vault = SecureVault(
-    caller="my_app",
-    keychain_prefix="claude-mcp",  # "claude-mcp-openai" 等を使用
-)
+```json
+{
+  "monthly_limit_usd": 0,
+  "providers": {
+    "openai": {
+      "models": ["gpt-4o", "dall-e-3", "sora-2"]
+    },
+    "google": {
+      "models": ["gemini-3-pro-image-preview", "imagen-4.0-generate-001"]
+    }
+  }
+}
 ```
 
-### カスタムデータディレクトリ
+予算はUSD建てで、暦月単位で適用されます。デフォルトは `0`（予算無効。コストチェックなしでキーが返されます）。値を設定すると予算ゲーティングが有効になります。
 
-```python
-vault = SecureVault(
-    caller="my_app",
-    data_dir="/path/to/usage/data",
-)
+### `pricing.json` — モデル料金テーブル
+
+```json
+{
+  "gpt-4o": {
+    "type": "per_token",
+    "input_per_1k": 0.0025,
+    "output_per_1k": 0.01
+  },
+  "dall-e-3": {
+    "type": "per_image",
+    "variants": {
+      "standard_1024x1024": 0.040,
+      "hd_1024x1024": 0.080
+    },
+    "fallback": 0.120
+  },
+  "sora-2": {
+    "type": "per_second",
+    "rate": 0.10
+  }
+}
 ```
 
-### プロバイダの明示指定
+料金は静的です。bantoは実行時にプロバイダAPIから料金を取得しません。各プロバイダの公式料金ページで最新の料金を確認し、`pricing.json` を更新してください。
 
-設定のプロバイダ対応表にないモデルを使用する場合:
+### `sync.json` — マルチプラットフォーム同期設定
 
-```python
-key = vault.get_key(
-    model="my-custom-model",
-    provider="openai",
-    input_tokens=1000,
-    output_tokens=500,
-)
+```json
+{
+  "version": 1,
+  "keychain_service": "banto-sync",
+  "secrets": {},
+  "environments": {
+    "dev": {},
+    "prd": { "inherits": "dev" }
+  }
+}
 ```
 
-### CostGuardの直接使用（シークレットストレージなし）
-
-予算追跡のみを行う場合（ホールド/精算パターン）:
-
-```python
-from banto import CostGuard, BudgetExceededError
-
-guard = CostGuard(caller="my_mcp")
-
-# 予算をホールド（見積もりコストを予約）
-hold_id = guard.hold_budget(model="dall-e-3", provider="openai",
-                            n=1, quality="standard", size="1024x1024")
-# ... APIコール ...
-
-# 実コストで精算
-guard.settle_hold(hold_id, model="dall-e-3", n=1, provider="openai", operation="image")
-```
-
-ホールドなしで使用する場合（後方互換）:
-
-```python
-guard.check_budget(model="dall-e-3", n=1, quality="standard", size="1024x1024")
-# ... APIコール ...
-guard.record_usage(model="dall-e-3", n=1, provider="openai", operation="image")
-```
+`banto sync init` で作成されます。メタデータのみを含み、シークレット値は含まれません。
 
 ## 免責事項
 
-bantoは予算管理を支援するツールであり、API利用料金の超過を保証するものではありません。同梱または利用者が設定した料金テーブルの不正確さ、ソフトウェアの不具合、設定の誤り、bantoのAPIを経由せずにAPIキーやプロバイダサービスにアクセスするエージェントやプロセスに起因する金銭的損害について、作者は一切の責任を負いません。利用者は、各プロバイダの課金ダッシュボードで実際のAPI利用料金を確認し、料金テーブルを最新の状態に維持する責任を負います。
-
-詳細は [LICENSE](./LICENSE) をご参照ください。
+bantoは予算管理を支援するツールであり、API利用料金の超過を防止することを保証するものではありません。料金テーブルの不正確さ、ソフトウェアの不具合、設定の誤り、bantoのAPIを迂回するエージェントに起因する金銭的損害について、作者は一切の責任を負いません。利用者は、各プロバイダの課金ダッシュボードで実際のAPI利用料金を監視し、料金テーブルを最新の状態に維持する責任を負います。
 
 ## ライセンス
 
