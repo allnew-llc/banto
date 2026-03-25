@@ -359,7 +359,13 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 
 ### 脅威モデル
 
-bantoはbantoのAPIを通じてのみキーにアクセスするエージェントに対して有効です。直接シェルアクセスを持つエージェントはmacOS Keychainに独自に問い合わせることが可能です。多層防御として、エージェントランタイム側でシェルアクセスを制限することを推奨します。
+bantoはプロセス引数や標準ログへのシークレット露出を防止します。以下に対しては防御**しません**:
+
+- **無制限シェルアクセスを持つエージェント** — `security` CLI で直接 Keychain を問い合わせ可能
+- **カーネルレベルの検査** — OS 監査サブシステムやファイルシステムレベルのアクセスは tempfile 削除前に観測可能
+- **トンネルプロバイダーの可視性** — `banto chatgpt connect` はメタデータ（シークレット名、同期状態）を ngrok / Cloudflare 経由でルーティング
+
+多層防御として: エージェントランタイム側でシェルアクセスを制限し、センシティブな環境では OS レベルのアクセス制御も検討してください。
 
 `sync export` と `sync run` は相互運用のため意図的にシークレットを環境変数やstdoutに出力します。エージェントコンテキストではこれらを使用しないでください。
 
@@ -577,7 +583,7 @@ vault = SecureVault(
 ```json
 {
   "version": 1,
-  "keychain_service": "banto-sync",
+  "keychain_service": "my-vault",
   "secrets": {},
   "environments": {
     "dev": {},
