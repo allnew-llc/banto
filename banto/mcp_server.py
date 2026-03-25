@@ -453,7 +453,64 @@ async def banto_budget_status() -> dict:
         }
 
 
-# ── Tool 7: register_key (not destructive, openWorld) ────────────
+# ── Tool 7: sync_setup (not destructive) ─────────────────────────
+
+@mcp.tool(annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "openWorldHint": False,
+})
+async def banto_sync_setup(platform: str, project: str, dry_run: bool = False) -> dict:
+    """Auto-detect env vars on a platform and match to Keychain entries.
+
+    One command to configure sync for an entire project. Scans the platform
+    for existing env var names, matches them to Keychain entries, and
+    registers the mappings in sync.json.
+
+    Args:
+        platform: Target platform (e.g. "vercel", "cloudflare-pages").
+        project: Project name on the platform.
+        dry_run: If true, show what would be configured without changing anything.
+
+    Example: banto_sync_setup(platform="vercel", project="allnew-corporate")
+    """
+    from .sync.setup import run_setup
+
+    matches = run_setup(platform=platform, project=project, dry_run=dry_run)
+
+    matched = [m for m in matches if m.status == "matched"]
+    missing = [m for m in matches if m.status == "missing"]
+    existing = [m for m in matches if m.status == "already_configured"]
+
+    results = [
+        {"env_var": m.env_var, "keychain": m.keychain_service, "status": m.status}
+        for m in matches
+    ]
+
+    parts = []
+    if matched:
+        action = "Would register" if dry_run else "Registered"
+        parts.append(f"{action} {len(matched)} secret(s)")
+    if existing:
+        parts.append(f"{len(existing)} already configured")
+    if missing:
+        parts.append(f"{len(missing)} not found in Keychain")
+
+    return {
+        "structuredContent": {
+            "platform": platform,
+            "project": project,
+            "dry_run": dry_run,
+            "matched": len(matched),
+            "missing": len(missing),
+            "already_configured": len(existing),
+            "results": results,
+        },
+        "content": f"Setup {platform}:{project} — " + ", ".join(parts),
+    }
+
+
+# ── Tool 8: register_key (not destructive, openWorld) ────────────
 
 @mcp.tool(annotations={
     "readOnlyHint": False,
