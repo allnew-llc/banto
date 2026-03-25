@@ -179,9 +179,11 @@ def cmd_sync_add(args: list[str]) -> None:
     config, config_path = _load_config(args)
 
     # Parse: banto sync add <name> --env <ENV_VAR> [--target platform:project ...]
+    #         [--account <keychain_account>]  — reference existing Keychain entry, skip value input
     name = None
     env_name = None
     description = ""
+    account = None
     targets: list[str] = []
 
     i = 0
@@ -195,8 +197,13 @@ def cmd_sync_add(args: list[str]) -> None:
         elif args[i] == "--target" and i + 1 < len(args):
             targets.append(args[i + 1])
             i += 2
+        elif args[i] == "--account" and i + 1 < len(args):
+            account = args[i + 1]
+            i += 2
         elif args[i] == "--config":
             i += 2  # skip
+        elif args[i] == "--json":
+            i += 1
         elif not args[i].startswith("--") and name is None:
             name = args[i]
             i += 1
@@ -204,23 +211,40 @@ def cmd_sync_add(args: list[str]) -> None:
             i += 1
 
     if not name or not env_name:
-        print("Usage: banto sync add <name> --env <ENV_VAR> [--target platform:project]")
+        print("Usage: banto sync add <name> --env <ENV_VAR> [--target platform:project] [--account <keychain_account>]")
         sys.exit(1)
 
     if config.get_secret(name):
         print(f"Error: Secret '{name}' already exists.")
         sys.exit(1)
 
-    value = getpass.getpass(f"Enter value for {name}: ")
-    if not value:
-        print("Empty value. Cancelled.")
-        sys.exit(1)
-
-    # Store in Keychain
     kc = KeychainStore(service_prefix=config.keychain_service)
-    if not kc.store(name, value):
-        print("Error: Failed to store in Keychain.")
-        sys.exit(1)
+    effective_account = account or name
+
+    if account:
+        # Reference existing Keychain entry — no value input needed
+        # Verify the entry exists
+        existing = kc.get(account)
+        if existing is None:
+            # Try without prefix (raw Keychain service name)
+            import subprocess as sp
+            raw_check = sp.run(
+                ["security", "find-generic-password", "-s", account, "-w"],
+                capture_output=True, text=True,
+            )
+            if raw_check.returncode != 0:
+                print(f"Error: Keychain entry '{account}' not found.")
+                sys.exit(1)
+        value = None  # Don't need the value for config registration
+    else:
+        # Interactive: prompt for value
+        value = getpass.getpass(f"Enter value for {name}: ")
+        if not value:
+            print("Empty value. Cancelled.")
+            sys.exit(1)
+        if not kc.store(name, value):
+            print("Error: Failed to store in Keychain.")
+            sys.exit(1)
 
     # Parse targets
     parsed_targets: list[Target] = []
@@ -235,20 +259,22 @@ def cmd_sync_add(args: list[str]) -> None:
             parsed_targets.append(Target(platform=platform, project=project))
 
     entry = SecretEntry(
-        name=name, account=name, env_name=env_name,
+        name=name, account=effective_account, env_name=env_name,
         description=description, targets=parsed_targets,
     )
     config.add_secret(entry)
     config.save(config_path)
 
-    # Record history
-    history = HistoryStore()
-    ver = history.record(name, value, config.keychain_service)
-    if ver is None:
-        print("Warning: Failed to record version history (Keychain write failed).",
-              file=sys.stderr)
+    # Record history (only if we have a value — skip for --account references)
+    if value:
+        history = HistoryStore()
+        ver = history.record(name, value, config.keychain_service)
+        if ver is None:
+            print("Warning: Failed to record version history (Keychain write failed).",
+                  file=sys.stderr)
 
-    print(f"Added '{name}' ({env_name}) with {len(parsed_targets)} target(s).")
+    source = f"account={effective_account}" if account else env_name
+    print(f"Added '{name}' ({source}) with {len(parsed_targets)} target(s).")
 
     if parsed_targets:
         print("Syncing to targets...")

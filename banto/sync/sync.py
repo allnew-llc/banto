@@ -133,6 +133,15 @@ def sync_secret(
     kc = KeychainStore(service_prefix=config.keychain_service)
     value = kc.get(entry.account)
     if value is None:
+        # Fallback: try raw service name (for --account references like "claude-mcp-openai")
+        import subprocess as _sp
+        _raw = _sp.run(
+            ["security", "find-generic-password", "-s", entry.account, "-w"],
+            capture_output=True, text=True,
+        )
+        if _raw.returncode == 0 and _raw.stdout.strip():
+            value = _raw.stdout.strip()
+    if value is None:
         report.results.append(SyncResult(
             secret_name=secret_name,
             target_label="keychain",
