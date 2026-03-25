@@ -7,7 +7,7 @@
 
 banto is a local-first secret management tool. All API keys and secrets are stored exclusively in the macOS Keychain on your device.
 
-- **No banto servers**: banto has no cloud backend, no hosted service, no servers that receive your data.
+- **No banto servers**: banto has no cloud backend, no hosted service, no servers that receive your data. **Exception**: the optional `banto chatgpt connect` feature routes metadata through third-party tunnel providers (ngrok or Cloudflare). See [Third-Party Data Sharing](#2-third-party-data-sharing) below.
 - **No telemetry**: banto does not collect usage analytics, crash reports, or behavioral data.
 - **No tracking**: banto does not use cookies, pixels, device fingerprinting, or any tracking mechanism.
 - **No account required**: banto does not require registration or user accounts.
@@ -27,12 +27,18 @@ When you explicitly run `sync push` or use the `banto_sync_push` tool, banto sen
 When you explicitly run `validate` or use the `banto_validate` / `banto_validate_keychain` tools, banto sends API keys to their respective provider endpoints (e.g., OpenAI, Anthropic, Google) to perform read-only health checks (typically GET requests to /v1/models or equivalent). No data beyond the API key header is sent.
 
 ### chatgpt connect (User-Initiated)
-When you run `banto chatgpt connect`, banto starts a local MCP server and exposes it via a third-party tunnel service (ngrok or Cloudflare Tunnel). During this session:
-- **MCP request/response traffic** is proxied through the tunnel provider (ngrok Inc. or Cloudflare Inc.).
-- The tunnel provider may log connection metadata (IP addresses, timestamps, request sizes) per their own privacy policies.
-- Secret values are never included in MCP tool responses, but metadata about secret names, target platforms, sync status, and budget data may pass through the tunnel.
-- The tunnel URL contains a random capability token; only those with the URL can access the endpoint.
-- The tunnel session ends when you stop the command (Ctrl+C).
+When you run `banto chatgpt connect`, banto starts a local MCP server and exposes it via a third-party tunnel service (ngrok or Cloudflare Tunnel). During this session, the tunnel provider has access to the following **metadata** (not secret values):
+- Secret names (e.g., "openai", "github")
+- Target platform names (e.g., "vercel", "cloudflare-pages")
+- Sync status (push success/failure, drift detection results)
+- Budget usage metrics (remaining balance, per-provider spend)
+- Validation results (pass/fail/unknown per key)
+
+The tunnel provider may also log connection metadata (IP addresses, timestamps, request sizes) per their own privacy policies. See [ngrok Privacy Policy](https://ngrok.com/privacy) and [Cloudflare Privacy Policy](https://www.cloudflare.com/privacypolicy/) for details on their data retention and sharing practices.
+
+**Secret values are never included in MCP tool responses.** The tunnel URL contains a random capability token; only those with the URL can access the endpoint. The session ends when you stop the command (Ctrl+C).
+
+Do not use `banto chatgpt connect` if you cannot accept that the metadata listed above may transit external tunnel providers.
 
 All actions:
 - Are triggered only by explicit user or agent commands, never automatically.
@@ -101,7 +107,7 @@ GitHub: [https://github.com/allnew-llc/banto/issues](https://github.com/allnew-l
 
 bantoはローカルファースト設計のシークレット管理ツールです。すべてのAPIキーおよびシークレットは、お使いのデバイス上のmacOSキーチェーンにのみ保存されます。
 
-- **bantoサーバーなし**: bantoにはクラウドバックエンド、ホスティングサービス、データを受信するサーバーは一切存在しません。
+- **bantoサーバーなし**: bantoにはクラウドバックエンド、ホスティングサービス、データを受信するサーバーは一切存在しません。**例外**: オプションの `banto chatgpt connect` 機能は、第三者のトンネルプロバイダー（ngrok または Cloudflare）を経由してメタデータをルーティングします。詳細は下記「第三者へのデータ共有」をご覧ください。
 - **テレメトリなし**: bantoは利用統計、クラッシュレポート、行動データを一切収集しません。
 - **トラッキングなし**: bantoはCookie、トラッキングピクセル、デバイスフィンガープリント、その他のトラッキング手段を一切使用しません。
 - **アカウント不要**: bantoにはユーザー登録やアカウントは必要ありません。
@@ -121,12 +127,18 @@ bantoは自動的に第三者とデータを共有することはありません
 `validate` コマンドまたは `banto_validate` / `banto_validate_keychain` ツールを明示的に実行すると、bantoは各APIキーをそれぞれのプロバイダーエンドポイント（OpenAI、Anthropic、Googleなど）に送信し、読み取り専用のヘルスチェック（通常は /v1/models 等へのGETリクエスト）を実行します。APIキーヘッダー以外のデータは送信されません。
 
 ### chatgpt connect（ユーザー起動）
-`banto chatgpt connect` を実行すると、bantoはローカルMCPサーバーを起動し、第三者のトンネルサービス（ngrokまたはCloudflare Tunnel）を経由して公開します。このセッション中:
-- **MCPリクエスト/レスポンストラフィック** はトンネルプロバイダー（ngrok Inc. または Cloudflare Inc.）を経由してプロキシされます。
-- トンネルプロバイダーは、各社のプライバシーポリシーに従い、接続メタデータ（IPアドレス、タイムスタンプ、リクエストサイズ）をログに記録する場合があります。
-- シークレット値はMCPツールレスポンスに含まれませんが、シークレット名、ターゲットプラットフォーム、同期状態、予算データなどのメタデータはトンネルを通過する場合があります。
-- トンネルURLにはランダムなケイパビリティトークンが含まれ、URLを知る者のみがエンドポイントにアクセスできます。
-- トンネルセッションはコマンドの停止（Ctrl+C）時に終了します。
+`banto chatgpt connect` を実行すると、bantoはローカルMCPサーバーを起動し、第三者のトンネルサービス（ngrokまたはCloudflare Tunnel）を経由して公開します。このセッション中、トンネルプロバイダーは以下の**メタデータ**（シークレット値ではありません）にアクセスできます:
+- シークレット名（例: "openai", "github"）
+- ターゲットプラットフォーム名（例: "vercel", "cloudflare-pages"）
+- 同期状態（プッシュの成功/失敗、ドリフト検出結果）
+- 予算使用量メトリクス（残額、プロバイダ別支出）
+- 検証結果（キーごとの pass/fail/unknown）
+
+トンネルプロバイダーは接続メタデータ（IPアドレス、タイムスタンプ、リクエストサイズ）をログに記録する場合があります。詳細は [ngrok プライバシーポリシー](https://ngrok.com/privacy) および [Cloudflare プライバシーポリシー](https://www.cloudflare.com/privacypolicy/) をご確認ください。
+
+**シークレット値はMCPツールレスポンスに含まれません。** トンネルURLにはランダムなケイパビリティトークンが含まれ、URLを知る者のみがアクセスできます。セッションはコマンドの停止（Ctrl+C）時に終了します。
+
+上記のメタデータが外部トンネルプロバイダーを通過することを受け入れられない場合は、`banto chatgpt connect` を使用しないでください。
 
 いずれの操作も:
 - ユーザーまたはエージェントの明示的なコマンドによってのみ実行され、自動的には行われません。

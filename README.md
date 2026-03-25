@@ -359,7 +359,13 @@ All tools include OpenAI-compatible annotations (`readOnlyHint`, `destructiveHin
 
 ### Threat model
 
-banto protects against agents that access keys exclusively through banto's API. An agent with direct shell access could query macOS Keychain independently. For defense-in-depth, restrict shell access in your agent runtime.
+banto protects secrets from exposure through process arguments and standard logging. It does **not** protect against:
+
+- **Agents with unrestricted shell access** — they can query macOS Keychain directly via `security` CLI
+- **Kernel-level inspection** — OS audit subsystems or filesystem-level access can observe tempfiles before deletion
+- **Tunnel provider visibility** — `banto chatgpt connect` routes metadata (secret names, sync status) through ngrok or Cloudflare
+
+For defense-in-depth: restrict shell access in your agent runtime, and consider OS-level access controls for sensitive environments.
 
 `sync export` and `sync run` intentionally materialize secrets into environment variables or stdout for interoperability. Do not use these in agent contexts.
 
@@ -577,7 +583,7 @@ Prices are static. banto does not fetch pricing from provider APIs at runtime. V
 ```json
 {
   "version": 1,
-  "keychain_service": "banto-sync",
+  "keychain_service": "my-vault",
   "secrets": {},
   "environments": {
     "dev": {},
