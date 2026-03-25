@@ -27,14 +27,43 @@ banto is a local-first secret management platform built on macOS Keychain. Store
 </p>
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9'}}}%%
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#ffffff',
+    'primaryTextColor': '#262626',
+    'primaryBorderColor': '#262626',
+    'lineColor': '#262626',
+    'secondaryColor': '#0D3B66',
+    'tertiaryColor': '#F2EFE9'
+  }
+}}%%
 graph LR
-    H["👤 Human"] -->|register key| B["🏮 banto"]
-    A["🤖 Agent"] -->|orchestrate| B
-    B -->|store| K[("🔑 Keychain")]
-    B -->|sync| T["☁️ 33 Platforms"]
-    B -->|gate| BG["💰 Budget"]
-    A -->|use key| T
+    subgraph Setup ["User Space"]
+        H[Human] --- KC[(Keychain)]
+    end
+
+    subgraph Core ["banto Logic"]
+        B{{"banto"}}
+    end
+
+    subgraph Agents ["Execution"]
+        A[AI Agent] --- M[MCP Server]
+    end
+
+    subgraph Target ["Cloud"]
+        P[33+ Platforms]
+    end
+
+    H -.-> B
+    A --> M --> B
+    B --> KC
+    B --> P
+    A -.-> P
+
+    style B fill:#0D3B66,color:#fff,stroke:#0D3B66
+    style KC fill:#F2EFE9,stroke:#262626
+    style P fill:#F2EFE9,stroke:#262626
 ```
 
 ## Table of Contents
