@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.1.0-blue" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python">
-  <img src="https://img.shields.io/badge/license-Dual%20(Personal%20%2F%20Commercial)-green" alt="license">
-  <img src="https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen" alt="dependencies">
-  <img src="https://img.shields.io/badge/tests-230%20passed-brightgreen" alt="tests">
-  <img src="https://img.shields.io/badge/platforms-33%20drivers-blue" alt="platforms">
-  <img src="https://img.shields.io/badge/MCP%20tools-10-blue" alt="mcp tools">
+  <img src="https://img.shields.io/badge/version-5.1.0-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
+  <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
+  <img src="https://img.shields.io/badge/230%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
+  <img src="https://img.shields.io/badge/33%20drivers-0D3B66?style=flat-square&label=platforms" alt="platforms">
+  <img src="https://img.shields.io/badge/10%20tools-262626?style=flat-square&label=MCP" alt="mcp">
 </p>
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
@@ -29,68 +29,64 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 </p>
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#0D3B66', 'primaryTextColor': '#F2EFE9', 'primaryBorderColor': '#262626', 'lineColor': '#262626', 'secondaryColor': '#1a1a2e', 'tertiaryColor': '#0D3B66', 'fontSize': '13px', 'fontFamily': 'system-ui, sans-serif'}}}%%
+
 graph LR
-    subgraph Human ["Human (values only)"]
-        H[Browser Popup / Terminal]
+    subgraph Human ["Human · 人間"]
+        H["Browser Popup<br/>Terminal"]
     end
 
-    subgraph Agent ["AI Agent (metadata only)"]
-        A[Claude Code / ChatGPT]
+    subgraph Agent ["AI Agent"]
+        A["Claude Code<br/>ChatGPT"]
     end
 
-    subgraph Banto ["banto"]
-        MCP[MCP Server<br/>10 tools]
-        SYNC[Sync Engine<br/>33 drivers]
-        BUDGET[Budget<br/>opt-in]
-        LEASE[Lease<br/>opt-in]
+    subgraph Banto ["banto · 番頭"]
+        MCP["MCP Server<br/>10 tools"]
+        SYNC["Sync Engine<br/>33 drivers"]
+        BUDGET["Budget<br/><i>opt-in</i>"]
+        LEASE["Lease<br/><i>opt-in</i>"]
     end
 
-    subgraph Storage ["Storage"]
-        KC[(macOS Keychain<br/>Secure Enclave)]
+    subgraph Storage ["Keychain"]
+        KC[("macOS Keychain<br/>Secure Enclave")]
     end
 
-    subgraph Targets ["Cloud Platforms"]
-        V[Vercel]
-        CF[Cloudflare]
-        AWS[AWS]
-        MORE[+30 more]
+    subgraph Targets ["Cloud · 33 Platforms"]
+        V["Vercel"]
+        CF["Cloudflare"]
+        AWS["AWS"]
+        MORE["..."]
     end
 
-    H -->|secret values| KC
-    A -->|orchestrate| MCP
+    H -- "secret values" --> KC
+    A -- "orchestrate" --> MCP
     MCP --> SYNC
-    MCP --> BUDGET
-    MCP --> LEASE
-    KC -->|ctypes| SYNC
-    SYNC -->|stdin/tempfile| V
-    SYNC -->|stdin/tempfile| CF
-    SYNC -->|stdin/tempfile| AWS
-    SYNC -->|stdin/tempfile| MORE
-
-    style Human fill:#0d3222,stroke:#3fb950,color:#3fb950
-    style Agent fill:#1c2636,stroke:#58a6ff,color:#58a6ff
-    style Banto fill:#2d1f00,stroke:#d29922,color:#d29922
-    style Storage fill:#0d3222,stroke:#3fb950,color:#e6edf3
-    style Targets fill:#1c2636,stroke:#58a6ff,color:#e6edf3
+    MCP -.-> BUDGET
+    MCP -.-> LEASE
+    KC -- "ctypes" --> SYNC
+    SYNC -- "stdin" --> V
+    SYNC -- "stdin" --> CF
+    SYNC -- "stdin" --> AWS
+    SYNC -- "stdin" --> MORE
 ```
 
 ## Table of Contents
 
-- [Key features](#key-features)
-- [Why banto?](#why-banto)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [CLI reference](#cli-reference)
-- [MCP server](#mcp-server)
-- [Security](#security)
-- [Python API](#python-api)
-- [Custom backends](#custom-backends)
-- [Configuration](#configuration)
-- [FAQ](#faq)
-- [Disclaimer](#disclaimer)
-- [License](#license)
+- [🔑 Key features](#-key-features)
+- [🏮 Why banto?](#-why-banto)
+- [📋 Requirements](#-requirements)
+- [⚡ Quick start](#-quick-start)
+- [💻 CLI reference](#-cli-reference)
+- [🤖 MCP server](#-mcp-server)
+- [🔒 Security](#-security)
+- [🐍 Python API](#-python-api)
+- [🔌 Custom backends](#-custom-backends)
+- [⚙️ Configuration](#️-configuration)
+- [❓ FAQ](#-faq)
+- [⚖️ Disclaimer](#️-disclaimer)
+- [📄 License](#-license)
 
-## Key features
+## 🔑 Key features
 
 - **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
 - **API key validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing
@@ -112,7 +108,7 @@ Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify
 
 </details>
 
-## Why banto?
+## 🏮 Why banto?
 
 Other secret managers (Doppler, Infisical, 1Password CLI) require you to manually configure every secret. banto lets your AI agent do it:
 
@@ -165,13 +161,13 @@ BANTO SYNC VALIDATE — Testing 8 key(s)
   PASS    cloudflare-api-token: Token valid
 ```
 
-## Requirements
+## 📋 Requirements
 
 - macOS (uses Keychain for secret storage)
 - Python 3.10+
 - No external dependencies (MCP server: `pip install banto[mcp]`)
 
-## Quick start
+## ⚡ Quick start
 
 ### 1. Install
 
@@ -232,7 +228,7 @@ banto budget 100                     # $100/month global limit
 banto budget --provider openai 30    # $30/month for OpenAI
 ```
 
-## CLI reference
+## 💻 CLI reference
 
 <details>
 <summary><strong>Core commands (9)</strong></summary>
@@ -296,7 +292,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 All commands support `--json` for machine-readable output.
 
-## MCP server
+## 🤖 MCP server
 
 banto exposes an MCP server so AI agents can orchestrate secret management. Agents never receive secret values — all tools return metadata only.
 
@@ -355,7 +351,7 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 
 All tools include OpenAI-compatible annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`).
 
-## Security
+## 🔒 Security
 
 - **ctypes Keychain access** — `store()` and `get()` call macOS Security framework directly (SecKeychainAddGenericPassword / SecKeychainFindGenericPassword). No subprocess, no argv exposure
 - **stdin-based sync drivers** — all 33 drivers pass secrets via stdin pipe, tempfile (0600), or `curl -K -` / `-d @file`. Secret values never appear in process arguments
@@ -372,7 +368,7 @@ banto protects against agents that access keys exclusively through banto's API. 
 
 `sync export` and `sync run` intentionally materialize secrets into environment variables or stdout for interoperability. Do not use these in agent contexts.
 
-## Python API
+## 🐍 Python API
 
 ### With budget gating
 
@@ -435,7 +431,7 @@ hold_id = guard.hold_budget(model="dall-e-3", provider="openai",
 guard.settle_hold(hold_id, model="dall-e-3", n=1, provider="openai", operation="image")
 ```
 
-## Custom backends
+## 🔌 Custom backends
 
 The secret storage is pluggable via the `SecretBackend` protocol. Any object with `get`, `store`, `delete`, `exists`, and `list_providers` methods works. No inheritance required.
 
@@ -533,7 +529,7 @@ vault = SecureVault(
 
 See [examples/06_custom_backend.py](./examples/06_custom_backend.py) for complete implementations.
 
-## Configuration
+## ⚙️ Configuration
 
 All config files live in `~/.config/banto/`. Run `banto init` to create defaults.
 
@@ -597,7 +593,7 @@ Prices are static. banto does not fetch pricing from provider APIs at runtime. V
 
 Created by `banto sync init`. Contains metadata only — no secret values.
 
-## FAQ
+## ❓ FAQ
 
 <details>
 <summary><strong>What happens when the budget is exceeded?</strong></summary>
@@ -623,7 +619,7 @@ The hold stays reserved. This is by design (safe-side bias). The held amount con
 <details>
 <summary><strong>Can an agent bypass banto and read Keychain directly?</strong></summary>
 
-Yes, if the agent has direct shell access. banto protects against agents that use only `get_key()`. For defense-in-depth, restrict shell access in your agent runtime. See the [Security](#security) section.
+Yes, if the agent has direct shell access. banto protects against agents that use only `get_key()`. For defense-in-depth, restrict shell access in your agent runtime. See the [Security](#-security) section.
 
 </details>
 
@@ -648,11 +644,11 @@ Negligible. banto runs entirely locally — Keychain access via ctypes is sub-mi
 
 </details>
 
-## Disclaimer
+## ⚖️ Disclaimer
 
 banto is a budget management aid, not a guarantee against excessive API charges. The authors shall not be liable for any financial losses arising from inaccurate pricing tables, software defects, configuration errors, or agents that bypass banto's API. Users are solely responsible for monitoring actual API spend through each provider's billing dashboard and for keeping the pricing table up to date.
 
-## License
+## 📄 License
 
 Dual license:
 
