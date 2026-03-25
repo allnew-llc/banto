@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Local-first secret management for AI agents and developers.
+  One command. 33 platforms. Your secrets, everywhere they need to be.
 </p>
 
 <p align="center">
@@ -20,50 +20,39 @@
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
-banto is a local-first secret management platform built on macOS Keychain. Store API keys securely, sync them to 33 cloud platforms, and let AI agents orchestrate everything — without ever seeing the values.
+banto syncs your API keys from macOS Keychain to 33 cloud platforms in one command. No more copy-pasting secrets into dashboards. Tell your AI agent _"deploy my secrets to Vercel"_ and it's done — the agent orchestrates, banto syncs, and secret values never enter the chat. Optional budget gating adds intelligent cost control on top.
 
 <p align="center">
   <img src="docs/assets/conceptual-flow.png" width="720" alt="banto conceptual flow">
 </p>
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'primaryColor': '#ffffff',
-    'primaryTextColor': '#262626',
-    'primaryBorderColor': '#262626',
-    'lineColor': '#262626',
-    'secondaryColor': '#0D3B66',
-    'tertiaryColor': '#F2EFE9'
-  }
-}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626' }}}%%
 graph LR
-    subgraph Setup ["User Space"]
-        H[Human] --- KC[(Keychain)]
+    subgraph Local ["Secure Origin"]
+        KC[(macOS Keychain)]
     end
 
-    subgraph Core ["banto Logic"]
+    subgraph Hub ["banto Engine"]
         B{{"banto"}}
+        V[Budget Logic]
     end
 
-    subgraph Agents ["Execution"]
-        A[AI Agent] --- M[MCP Server]
+    subgraph Cloud ["33+ Sync Targets"]
+        GH[GitHub]
+        VC[Vercel]
+        AWS[AWS Secrets]
+        GCP[GCP Secret Mgr]
+        ETC[...]
     end
 
-    subgraph Target ["Cloud"]
-        P[33+ Platforms]
-    end
-
-    H -.-> B
-    A --> M --> B
-    B --> KC
-    B --> P
-    A -.-> P
-
-    style B fill:#0D3B66,color:#fff,stroke:#0D3B66
-    style KC fill:#F2EFE9,stroke:#262626
-    style P fill:#F2EFE9,stroke:#262626
+    KC --> B
+    B -- "Validate & Guard" --> V
+    B ==> GH
+    B ==> VC
+    B ==> AWS
+    B ==> GCP
+    B ==> ETC
 ```
 
 ## Table of Contents
@@ -84,18 +73,18 @@ graph LR
 
 ## 🔑 Key features
 
-- **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
-- **API key validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing
-- **One-command platform setup** — `banto sync setup vercel:my-project` auto-detects env vars, matches Keychain entries, and configures sync in one step
-- **AI agent integration** — tell Claude or ChatGPT _"sync my secrets to Vercel"_ and it handles everything. Agents orchestrate; humans provide values via browser popup. Agents never see secret values
-- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel)
-- **Optional budget gating** — hold/settle pattern for LLM cost control with global, per-provider, and per-model limits
+- **33+ platform sync** — one command deploys secrets to Vercel, Cloudflare, AWS, GCP, Azure, Kubernetes, GitHub Actions, and 26 more. No dashboard clicking
+- **One-command setup** — `banto sync setup vercel:my-project` auto-detects env vars, matches Keychain entries, and configures everything in one step
+- **AI agent integration** — tell Claude or ChatGPT _"sync my secrets to Vercel"_ and it's done. Agents orchestrate; humans provide values via browser popup. Values never enter the chat
+- **Pre-push validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing to catch invalid keys early
+- **Drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches when your deployed secrets are out of date
+- **Budget guard** — optional hold/settle pattern for LLM cost control. No budget = no key. Global, per-provider, and per-model limits
 - **Dynamic leases** — acquire short-lived credentials with TTL, auto-revoke on expiry
+- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel). 10 tools, all metadata-only
+- **Keychain-native storage** — macOS Security framework via ctypes; secret values never appear in process arguments
 - **Web dashboard** — localhost-only CRUD interface with CSRF protection (`banto sync ui`)
-- **Fingerprint drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches drift
-- **`--json` output for all commands** — machine-readable output for agent and CI integration
-- **Notification integrations** — Slack, Microsoft Teams, Datadog Events, PagerDuty
-- **Zero runtime dependencies** — stdlib only (ctypes is part of stdlib); MCP server requires optional `mcp` package
+- **Notifications** — Slack, Microsoft Teams, Datadog Events, PagerDuty
+- **Zero dependencies** — stdlib only; MCP server requires optional `mcp` package
 
 <details>
 <summary><strong>33 platform sync drivers</strong> — Cloudflare, Vercel, AWS, GCP, Azure, and 28 more</summary>
@@ -186,40 +175,37 @@ pip install -e .
 pip install banto[mcp]
 ```
 
-### 2. Initialize config
+### 2. Sync to a platform — one command
 
 ```bash
-banto init          # creates ~/.config/banto/config.json and pricing.json
+banto sync setup vercel:my-project   # auto-detect env vars + match Keychain
+banto sync push                      # deploy to all targets
 ```
 
-### 3. Register an API key
+That's it. banto finds your keys in Keychain, maps them to env vars, and pushes.
+
+Or just tell your AI agent:
+
+> _"Sync my secrets to my-project on Vercel."_
+
+### 3. Register keys (if not already in Keychain)
 
 ```bash
 banto register openai    # opens browser popup — enter your key there
+banto store openai       # or paste at masked terminal prompt
 ```
 
-Or use the terminal:
+### 4. Validate before pushing
 
 ```bash
-banto store openai       # paste key at masked prompt
+banto sync validate --keychain       # test all keys against provider APIs
+banto sync push --validate           # validate + push in one step
 ```
 
-### 4. Sync to cloud platforms
+### 5. (Optional) Add budget control
 
 ```bash
-banto sync setup vercel:my-project   # auto-detect env vars + match Keychain → done
-banto sync push                      # push to all targets
-```
-
-Or ask your AI agent:
-
-> _"Sync my secrets to my-project on Vercel."_
->
-> The agent runs `banto_sync_setup` + `banto_sync_push`. You never paste secrets into chat.
-
-### 5. (Optional) Set a budget
-
-```bash
+banto init                           # create budget config
 banto budget 100                     # $100/month global limit
 banto budget --provider openai 30    # $30/month for OpenAI
 ```
