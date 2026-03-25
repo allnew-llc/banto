@@ -65,9 +65,9 @@ class CircleCIDriver(PlatformDriver):
         payload = json.dumps({"name": env_name, "value": value})
         fd, tmp_path = tempfile.mkstemp(prefix="banto-circleci-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             config = (
                 f'-H "Circle-Token: {token}"\n'
                 f'-H "Content-Type: application/json"\n'

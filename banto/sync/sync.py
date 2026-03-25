@@ -100,7 +100,7 @@ def _sync_one_target(
             secret_name=entry.name,
             target_label=label,
             success=False,
-            message=str(e),
+            message=type(e).__name__,
         )
     except Exception as e:
         audit.log_event("SYNC", entry.name, label, "ERROR", log_path=audit_log)

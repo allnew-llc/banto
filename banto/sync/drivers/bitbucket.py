@@ -83,9 +83,9 @@ class BitbucketPipelinesDriver(PlatformDriver):
 
         fd, tmp_path = tempfile.mkstemp(prefix="banto-bb-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             config = (
                 f'-u "{user}:{password}"\n'
                 f'-H "Content-Type: application/json"\n'

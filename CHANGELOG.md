@@ -7,7 +7,7 @@
 - **CSRF + Origin defense for web UI**: All POST endpoints now require a per-session CSRF token (`X-CSRF-Token` header), validate `Origin` header against localhost, and enforce `Content-Type: application/json`
 - **Capability URL for ChatGPT connect**: `banto chatgpt connect` generates a random path token (`/mcp-{token}`). The URL is the bearer credential — no separate auth needed, but URL must be treated as secret
 - **History fail-closed**: `record()` no longer saves metadata if Keychain write fails. Previously recorded metadata for broken versions (fail-open). Now returns `None` on failure
-- **Register popup**: localhost-only, random port, single-use (already existed but now noted as reviewed and confirmed by third-party audit)
+- **Register popup**: localhost-only, random port, single-use (already existed but now noted as reviewed in independent security assessment)
 
 ### New
 

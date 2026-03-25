@@ -31,6 +31,7 @@ Usage:
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shlex
@@ -83,6 +84,7 @@ class LeaseState:
         )
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
             os.write(fd, content.encode("utf-8"))
         finally:
             os.close(fd)
@@ -160,8 +162,7 @@ class LeaseManager:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"Command failed (exit {result.returncode}): "
-                f"{result.stderr.strip()[:200]}"
+                f"Command failed (exit {result.returncode})"
             )
 
         value = result.stdout.strip()

@@ -85,7 +85,17 @@ def _validate_anthropic(key: str) -> ValidationResult:
 
 
 def _validate_gemini(key: str) -> ValidationResult:
-    """Google Gemini: GET /v1beta/models (list models, read-only)."""
+    """Google Gemini: GET /v1beta/models (list models, read-only).
+
+    PRIVACY NOTE: Google's Generative Language API requires the API key to be
+    passed as a URL query parameter (?key=...) rather than in an Authorization
+    header. This is a design requirement of Google's API — there is no
+    header-based alternative for API-key authentication. URL query parameters
+    may be logged by intermediate network infrastructure (proxies, CDNs, web
+    server access logs) even when the connection uses TLS, because the full URL
+    (including query string) is visible after TLS termination at each hop.
+    See also: docs/privacy-policy.md.
+    """
     status, body = _http_get(
         f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
         {},

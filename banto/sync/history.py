@@ -16,6 +16,7 @@ Keychain storage scheme:
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -123,6 +124,7 @@ class HistoryStore:
         content = json.dumps(data, ensure_ascii=False, indent=2)
         fd = os.open(str(self.path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
             os.write(fd, content.encode("utf-8"))
         finally:
             os.close(fd)

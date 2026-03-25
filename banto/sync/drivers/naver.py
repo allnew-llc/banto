@@ -63,9 +63,9 @@ class NaverCloudDriver(PlatformDriver):
         })
         fd, tmp_path = tempfile.mkstemp(prefix="banto-naver-", suffix=".json")
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, payload.encode("utf-8"))
             os.close(fd)
-            os.chmod(tmp_path, 0o600)
             # Try update
             result = subprocess.run(
                 ["curl", "-s", "-X", "PUT", "-K", "-",
