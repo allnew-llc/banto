@@ -20,42 +20,21 @@
 
 > **番頭**（banto） -- 江戸時代の商家において蔵の鍵と帳簿を預かり、主人の留守にも商いの秩序を守った筆頭番頭に由来します。
 
-bantoはmacOS Keychainを基盤とするローカルファーストのシークレット管理プラットフォームです。コア機能はAPIキーをKeychain（ctypes経由、argv露出なし）に格納し、33のクラウドプラットフォームに同期します。オプションモジュールとして、予算ゲーティング（ホールド/精算によるコスト制御）と動的リース（TTL付き短期クレデンシャル）を提供します。MCPサーバーによりClaude CodeやChatGPTと連携し、AIエージェントがシークレット値に一切触れることなくシークレット管理を行えます。
+bantoはmacOS Keychainを基盤とするローカルファーストのシークレット管理プラットフォームです。APIキーを安全に保管し、33のクラウドプラットフォームに同期。AIエージェントがすべてをオーケストレーションし、シークレット値に一切触れることはありません。
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="bantoアーキテクチャ図" width="800">
+  <img src="docs/assets/conceptual-flow.png" width="720" alt="banto conceptual flow">
 </p>
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9', 'tertiaryColor': '#B13546'}}}%%
-graph TD
-    subgraph Users ["1. 人間 (セットアップ)"]
-        H[開発者] -->|2. キー登録| KC[(Keychain / Vault)]
-        KC -->|3. キー読取| C[banto 同期]
-    end
-
-    subgraph Agents ["4. エージェント (実行)"]
-        A[LLMエージェント] -->|5. 予算確認| MCP[MCPサーバー]
-        MCP -->|6. banto呼出| B
-    end
-
-    subgraph Banto_Guard ["7. banto (番頭)"]
-        B{ホールド要求}
-        B -->|確認| V[(予算)]
-        B -->|キー取得| C
-        D{精算 / 戻し}
-        D -->|更新| V
-        D -->|監査| L[(監査ログ)]
-    end
-
-    subgraph Targets ["8. ターゲット (同期)"]
-        C -->|同期| T1[OpenAI]
-        C -->|同期| T2[Anthropic]
-        C -->|同期| T3[Vercel / AWS / +30]
-    end
-
-    A -->|9. APIキー使用| T1
-    A -->|10. 使用量報告| D
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626', 'edgeLabelBackground':'#F2EFE9', 'secondaryColor': '#F2EFE9'}}}%%
+graph LR
+    H["👤 人間"] -->|キー登録| B["🏮 banto"]
+    A["🤖 エージェント"] -->|指示| B
+    B -->|保管| K[("🔑 Keychain")]
+    B -->|同期| T["☁️ 33プラットフォーム"]
+    B -->|制御| BG["💰 予算"]
+    A -->|キー使用| T
 ```
 
 ## 目次
