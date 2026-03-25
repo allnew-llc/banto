@@ -109,7 +109,7 @@ Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify
 
 ## 🏮 Why banto?
 
-Other secret managers (Doppler, Infisical, 1Password CLI) require you to manually configure every secret. banto lets your AI agent do it:
+Most secret managers require you to manually configure every secret in every platform. banto lets your AI agent do it:
 
 ```
 You:   "Deploy my secrets to allnew-corporate on Vercel."
