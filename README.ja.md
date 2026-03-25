@@ -535,6 +535,50 @@ vault = SecureVault(
 
 `banto sync init` で作成されます。メタデータのみを含み、シークレット値は含まれません。
 
+## よくある質問
+
+<details>
+<summary><strong>予算を超過した場合はどうなりますか？</strong></summary>
+
+`get_key()` が `BudgetExceededError` を発生させ、APIキーは返されません。bantoのAPI経由ではキーを取得する方法がありません。例外には `remaining`（残額）と `limit`（上限）が含まれます。
+
+</details>
+
+<details>
+<summary><strong>pricing.json はどのくらいの頻度で更新すべきですか？</strong></summary>
+
+月1回、プロバイダの料金ページを確認してください。bantoは実行時に料金を取得しません（主要プロバイダには公開料金APIがありません）。料金が変更された場合は `~/.config/banto/pricing.json` を編集してください。
+
+</details>
+
+<details>
+<summary><strong>record_usage() を呼ぶ前にエージェントがクラッシュした場合は？</strong></summary>
+
+ホールドは予約されたままです。これは設計上の意図です（安全側バイアス）。ホールド額は月がリセットされるか、ホールドがタイムアウト（デフォルト: 24時間、`hold_timeout_hours`）するまで予算に計上され続けます。
+
+</details>
+
+<details>
+<summary><strong>エージェントがbantoを迂回してKeychainを直接読めますか？</strong></summary>
+
+はい、直接シェルアクセスがある場合は可能です。bantoは `get_key()` のみを使用するエージェントに対して有効です。多層防御のため、エージェントランタイム側でシェルアクセスを制限することを推奨します。
+
+</details>
+
+<details>
+<summary><strong>LinuxやWindowsで使えますか？</strong></summary>
+
+現時点では未対応です。bantoはmacOS Keychain（Security.framework via ctypes）を使用しています。`SecretBackend` プロトコルにより `libsecret`（Linux）や DPAPI（Windows）バックエンドの追加は可能ですが、未実装です。
+
+</details>
+
+<details>
+<summary><strong>予算ゲーティングなしで使えますか？</strong></summary>
+
+はい。`SecureVault(budget=False)` でコストチェックなしにキーを直接取得できます。v4.0.0 以降、予算はオプトインです。
+
+</details>
+
 ## 免責事項
 
 bantoは予算管理を支援するツールであり、API利用料金の超過を防止することを保証するものではありません。料金テーブルの不正確さ、ソフトウェアの不具合、設定の誤り、bantoのAPIを迂回するエージェントに起因する金銭的損害について、作者は一切の責任を負いません。利用者は、各プロバイダの課金ダッシュボードで実際のAPI利用料金を監視し、料金テーブルを最新の状態に維持する責任を負います。

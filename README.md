@@ -535,6 +535,50 @@ Prices are static. banto does not fetch pricing from provider APIs at runtime. V
 
 Created by `banto sync init`. Contains metadata only — no secret values.
 
+## FAQ
+
+<details>
+<summary><strong>What happens when the budget is exceeded?</strong></summary>
+
+`get_key()` raises `BudgetExceededError` and the API key is not returned. The agent has no code path to obtain the key through banto's API. The exception includes `remaining` and `limit` amounts for error messages.
+
+</details>
+
+<details>
+<summary><strong>How often should I update pricing.json?</strong></summary>
+
+Check provider pricing pages monthly. banto does not fetch pricing at runtime — no major provider offers a public pricing API. When a provider changes rates, edit `~/.config/banto/pricing.json`. Incorrect rates mean inaccurate budget estimates, not security issues.
+
+</details>
+
+<details>
+<summary><strong>What if my agent crashes before calling record_usage()?</strong></summary>
+
+The hold stays reserved. This is by design (safe-side bias). The held amount continues to count against your budget until the month resets or the hold times out (default: 24 hours via `hold_timeout_hours`).
+
+</details>
+
+<details>
+<summary><strong>Can an agent bypass banto and read Keychain directly?</strong></summary>
+
+Yes, if the agent has direct shell access. banto protects against agents that use only `get_key()`. For defense-in-depth, restrict shell access in your agent runtime. See the [Security](#security) section.
+
+</details>
+
+<details>
+<summary><strong>Does banto work on Linux or Windows?</strong></summary>
+
+Not yet. banto uses macOS Keychain (Security.framework via ctypes). The `SecretBackend` protocol allows pluggable backends — a `libsecret` (Linux) or DPAPI (Windows) backend is possible but not implemented.
+
+</details>
+
+<details>
+<summary><strong>Can I use banto without budget gating?</strong></summary>
+
+Yes. `SecureVault(budget=False)` returns keys directly without cost checks. Budget is opt-in since v4.0.0.
+
+</details>
+
 ## Disclaimer
 
 banto is a budget management aid, not a guarantee against excessive API charges. The authors shall not be liable for any financial losses arising from inaccurate pricing tables, software defects, configuration errors, or agents that bypass banto's API. Users are solely responsible for monitoring actual API spend through each provider's billing dashboard and for keeping the pricing table up to date.
