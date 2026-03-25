@@ -30,8 +30,9 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 - **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
 - **33 platform sync drivers** — Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify, Render, Railway, Supabase, GitLab, GitHub Actions, CircleCI, Bitbucket, Terraform Cloud, Azure DevOps, Deno Deploy, Hasura, Laravel Forge, DigitalOcean, Alibaba, Tencent, Huawei, Naver, NHN, JD Cloud, Sakura, Volcengine, and more
 - **API key validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing
+- **One-command platform setup** — `banto sync setup vercel:my-project` auto-detects env vars, matches Keychain entries, and configures sync in one step
+- **AI agent integration** — tell Claude or ChatGPT _"sync my secrets to Vercel"_ and it handles everything. Agents orchestrate; humans provide values via browser popup. Agents never see secret values
 - **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel)
-- **Browser popup for key registration** — agents call `banto register`; the human enters the value in a localhost browser popup. Agents never see secret values
 - **Optional budget gating** — hold/settle pattern for LLM cost control with global, per-provider, and per-model limits
 - **Dynamic leases** — acquire short-lived credentials with TTL, auto-revoke on expiry
 - **Web dashboard** — localhost-only CRUD interface with CSRF protection (`banto sync ui`)
@@ -39,6 +40,29 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 - **`--json` output for all commands** — machine-readable output for agent and CI integration
 - **Notification integrations** — Slack, Microsoft Teams, Datadog Events, PagerDuty
 - **Zero runtime dependencies** — stdlib only (ctypes is part of stdlib); MCP server requires optional `mcp` package
+
+## Why banto?
+
+Other secret managers (Doppler, Infisical, 1Password CLI) require you to manually configure every secret. banto lets your AI agent do it:
+
+```
+You:   "Deploy my secrets to allnew-corporate on Vercel."
+
+Agent: → banto_sync_setup(platform="vercel", project="allnew-corporate")
+         ✓ OPENAI_API_KEY → claude-mcp-openai (matched)
+         ✓ LINE_CHANNEL_ACCESS_TOKEN → line-clawboy-channel-token (matched)
+         ✗ POSTGRES_URL (not in Keychain — opening browser for you to enter)
+       → banto_register_key(provider="postgres")
+         [Browser popup opens — you paste the value]
+       → banto_sync_push()
+         3 secrets pushed to Vercel.
+
+You:   Done.
+```
+
+**The agent orchestrates. The human provides values. Secret values never enter the chat.**
+
+This is possible because banto's architecture separates _what to do_ (agent-safe metadata operations) from _the actual secrets_ (Keychain + browser popup only).
 
 ## Requirements
 
@@ -83,10 +107,15 @@ banto store openai       # paste key at masked prompt
 ### 4. Sync to cloud platforms
 
 ```bash
-banto sync init                      # create sync.json
-banto sync add openai --env OPENAI_API_KEY --target vercel:my-project
+banto sync setup vercel:my-project   # auto-detect env vars + match Keychain → done
 banto sync push                      # push to all targets
 ```
+
+Or ask your AI agent:
+
+> _"Sync my secrets to my-project on Vercel."_
+>
+> The agent runs `banto_sync_setup` + `banto_sync_push`. You never paste secrets into chat.
 
 ### 5. (Optional) Set a budget
 
@@ -115,6 +144,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 | Command | Description |
 |---------|-------------|
+| `banto sync setup <plat:proj>` | Auto-detect env vars + match Keychain entries in one command (`--dry-run`) |
 | `banto sync init` | Create default `sync.json` config |
 | `banto sync status` | Sync status matrix (secrets x targets) |
 | `banto sync push [name]` | Push secrets from Keychain to targets (`--validate` for pre-push check) |
