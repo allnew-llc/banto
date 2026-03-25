@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.1.0-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-5.2.0-0D3B66?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
