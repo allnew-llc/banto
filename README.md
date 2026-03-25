@@ -15,6 +15,9 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python">
   <img src="https://img.shields.io/badge/license-Dual%20(Personal%20%2F%20Commercial)-green" alt="license">
   <img src="https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen" alt="dependencies">
+  <img src="https://img.shields.io/badge/tests-230%20passed-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/platforms-33%20drivers-blue" alt="platforms">
+  <img src="https://img.shields.io/badge/MCP%20tools-10-blue" alt="mcp tools">
 </p>
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
@@ -28,7 +31,6 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 ## Key features
 
 - **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
-- **33 platform sync drivers** — Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify, Render, Railway, Supabase, GitLab, GitHub Actions, CircleCI, Bitbucket, Terraform Cloud, Azure DevOps, Deno Deploy, Hasura, Laravel Forge, DigitalOcean, Alibaba, Tencent, Huawei, Naver, NHN, JD Cloud, Sakura, Volcengine, and more
 - **API key validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing
 - **One-command platform setup** — `banto sync setup vercel:my-project` auto-detects env vars, matches Keychain entries, and configures sync in one step
 - **AI agent integration** — tell Claude or ChatGPT _"sync my secrets to Vercel"_ and it handles everything. Agents orchestrate; humans provide values via browser popup. Agents never see secret values
@@ -40,6 +42,13 @@ banto is a local-first secret management platform built on macOS Keychain. The c
 - **`--json` output for all commands** — machine-readable output for agent and CI integration
 - **Notification integrations** — Slack, Microsoft Teams, Datadog Events, PagerDuty
 - **Zero runtime dependencies** — stdlib only (ctypes is part of stdlib); MCP server requires optional `mcp` package
+
+<details>
+<summary><strong>33 platform sync drivers</strong> — Cloudflare, Vercel, AWS, GCP, Azure, and 28 more</summary>
+
+Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify, Render, Railway, Supabase, GitLab, GitHub Actions, CircleCI, Bitbucket, Terraform Cloud, Azure DevOps, Deno Deploy, Hasura, Laravel Forge, DigitalOcean, Alibaba, Tencent, Huawei, Naver, NHN, JD Cloud, Sakura, Volcengine, and more
+
+</details>
 
 ## Why banto?
 
@@ -64,6 +73,36 @@ You:   Done.
 
 This is possible because banto's architecture separates _what to do_ (agent-safe metadata operations) from _the actual secrets_ (Keychain + browser popup only).
 
+### Terminal output: `sync setup`
+
+```
+$ banto sync setup vercel:allnew-corporate --dry-run
+
+BANTO SYNC SETUP — vercel:allnew-corporate
+
+  (dry run — no changes will be made)
+
+  MATCH  OPENAI_API_KEY -> claude-mcp-openai
+  MATCH  ANTHROPIC_API_KEY -> claude-mcp-anthropic
+  MATCH  LINE_CHANNEL_ACCESS_TOKEN -> line-clawboy-channel-token
+  MISS   POSTGRES_URL (no Keychain match)
+
+  Would register 3 secret(s). Remove --dry-run to apply.
+```
+
+### Terminal output: `sync validate`
+
+```
+$ banto sync validate --keychain
+
+BANTO SYNC VALIDATE — Testing 8 key(s)
+
+  PASS    claude-mcp-openai: Key valid
+  PASS    claude-mcp-anthropic: Key valid
+  UNKNOWN claude-mcp-xai: Cannot verify (403)
+  PASS    cloudflare-api-token: Token valid
+```
+
 ## Requirements
 
 - macOS (uses Keychain for secret storage)
@@ -75,15 +114,22 @@ This is possible because banto's architecture separates _what to do_ (agent-safe
 ### 1. Install
 
 ```bash
+# pip
 pip install banto
-```
 
-Or install from source:
+# uv (recommended)
+uv tool install banto
 
-```bash
+# pipx
+pipx install banto
+
+# From source
 git clone https://github.com/allnew-llc/banto.git
 cd banto
 pip install -e .
+
+# With MCP server support
+pip install banto[mcp]
 ```
 
 ### 2. Initialize config
@@ -126,7 +172,8 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 ## CLI reference
 
-### Core commands
+<details>
+<summary><strong>Core commands (9)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -140,7 +187,10 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto check <model> ...` | Dry-run budget check (`--tokens`, `--n`, `--seconds`, `--quality`, `--size`) |
 | `banto init` | Copy default config to `~/.config/banto/` |
 
-### Sync commands
+</details>
+
+<details>
+<summary><strong>Sync commands (13)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -158,7 +208,10 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto sync import <file>` | Import secrets from `.env` or `.json` file |
 | `banto sync ui [--port N]` | Launch localhost web dashboard (default port 8384) |
 
-### Lease commands
+</details>
+
+<details>
+<summary><strong>Lease commands (5)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -168,11 +221,16 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto lease list` | Show active leases with remaining TTL |
 | `banto lease cleanup` | Revoke all expired leases |
 
-### ChatGPT command
+</details>
+
+<details>
+<summary><strong>ChatGPT command (1)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
 | `banto chatgpt connect` | Start MCP HTTP server + tunnel, print ChatGPT Connector URL (`--ngrok` or `--cloudflared`) |
+
+</details>
 
 All commands support `--json` for machine-readable output.
 
