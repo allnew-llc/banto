@@ -27,32 +27,46 @@ banto syncs your API keys from macOS Keychain to 33 cloud platforms in one comma
 </p>
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0D3B66', 'primaryTextColor': '#fff', 'lineColor': '#262626' }}}%%
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#ffffff',
+    'primaryTextColor': '#262626',
+    'primaryBorderColor': '#0D3B66',
+    'lineColor': '#262626',
+    'secondaryColor': '#0D3B66',
+    'tertiaryColor': '#F2EFE9',
+    'edgeLabelBackground':'#ffffff'
+  }
+}}%%
 graph LR
-    subgraph Local ["Secure Origin"]
+    subgraph Origin ["1. Secure Origin"]
         KC[(macOS Keychain)]
     end
 
     subgraph Hub ["banto Engine"]
         B{{"banto"}}
-        V[Budget Logic]
+        V[[Guard Logic]]
     end
 
     subgraph Cloud ["33+ Sync Targets"]
-        GH[GitHub]
-        VC[Vercel]
-        AWS[AWS Secrets]
-        GCP[GCP Secret Mgr]
-        ETC[...]
+        T1[GitHub]
+        T2[Vercel]
+        T3[AWS / GCP / Azure]
+        T4[Cloudflare / etc.]
     end
 
-    KC --> B
-    B -- "Validate & Guard" --> V
-    B ==> GH
-    B ==> VC
-    B ==> AWS
-    B ==> GCP
-    B ==> ETC
+    KC --- B
+    B --- V
+    V -.->|Verify| B
+
+    B ==>|Secure Sync| T1
+    B ==>|Secure Sync| T2
+    B ==>|Secure Sync| T3
+    B ==>|Secure Sync| T4
+
+    style B fill:#0D3B66,color:#fff,stroke:#0D3B66
+    style V fill:#f8f9fa,stroke:#B13546,stroke-width:1px
 ```
 
 ## Table of Contents
