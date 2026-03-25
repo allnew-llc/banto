@@ -1063,7 +1063,7 @@ async function doEdit(name) {
 async function updateExportPreview() {
   var fmt = document.getElementById('export-format').value;
   var env = document.getElementById('export-env') ? document.getElementById('export-env').value : '';
-  var r = await api('GET', '/api/export?format=' + encodeURIComponent(fmt) + '&env=' + encodeURIComponent(env));
+  var r = await api('POST', '/api/export', {format: fmt, env: env});
   var preview = document.getElementById('export-preview');
   if (r.content !== undefined) {
     preview.innerHTML = '<div class="copy-overlay" id="copy-overlay">Copied!</div>' + esc(r.content);
@@ -1426,8 +1426,6 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self._json_response(_build_config_json(self.config))
         elif path == "/api/drivers":
             self._json_response({"drivers": ALL_PLATFORMS})
-        elif path == "/api/export":
-            self._handle_export(params)
         else:
             self.send_error(404)
 
@@ -1452,7 +1450,14 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         if length > 1_048_576:
             self._reject(413, "Payload Too Large")
             return
-        body = json.loads(self.rfile.read(length)) if length else {}
+        if length:
+            try:
+                body = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, ValueError):
+                self._reject(400, "Invalid JSON")
+                return
+        else:
+            body = {}
 
         if self.path == "/api/sync":
             self._handle_sync(body)
@@ -1470,6 +1475,8 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self._handle_validate()
         elif self.path == "/api/validate-keychain":
             self._handle_validate_keychain()
+        elif self.path == "/api/export":
+            self._handle_export(body)
         else:
             self.send_error(404)
 
@@ -1735,8 +1742,15 @@ class SyncUIHandler(BaseHTTPRequestHandler):
 
     # -- Export ------------------------------------------------
     def _handle_export(self, params: dict) -> None:
-        fmt = (params.get("format", ["env"])[0]).strip()
-        env_name = (params.get("env", [""])[0]).strip()
+        fmt = params.get("format", "env")
+        env_name = params.get("env", "")
+        # Support both POST body (string) and URL query (list) formats
+        if isinstance(fmt, list):
+            fmt = fmt[0]
+        if isinstance(env_name, list):
+            env_name = env_name[0]
+        fmt = str(fmt).strip()
+        env_name = str(env_name).strip()
 
         kc = KeychainStore(service_prefix=self.config.keychain_service)
 
