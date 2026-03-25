@@ -1,7 +1,9 @@
-# banto ChatGPT App - Golden Test Prompts
+# banto — MCP Tool Test Prompts
 
-Structured test prompts for OpenAI App Store submission review.
+Test prompts for verifying banto's MCP tools via ChatGPT Connector (Developer Mode) or Claude Code.
 Each entry specifies the user prompt, expected tool call, and expected response behavior.
+
+> Note: banto is designed for use as a **local ChatGPT Connector** (Developer Mode), not for public App Store submission. These prompts are for local testing and quality assurance.
 
 ---
 
