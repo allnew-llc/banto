@@ -28,6 +28,68 @@ banto is a local-first secret management platform built on macOS Keychain. The c
   <img src="docs/architecture.svg" alt="banto architecture diagram" width="800">
 </p>
 
+```mermaid
+graph LR
+    subgraph Human ["Human (values only)"]
+        H[Browser Popup / Terminal]
+    end
+
+    subgraph Agent ["AI Agent (metadata only)"]
+        A[Claude Code / ChatGPT]
+    end
+
+    subgraph Banto ["banto"]
+        MCP[MCP Server<br/>10 tools]
+        SYNC[Sync Engine<br/>33 drivers]
+        BUDGET[Budget<br/>opt-in]
+        LEASE[Lease<br/>opt-in]
+    end
+
+    subgraph Storage ["Storage"]
+        KC[(macOS Keychain<br/>Secure Enclave)]
+    end
+
+    subgraph Targets ["Cloud Platforms"]
+        V[Vercel]
+        CF[Cloudflare]
+        AWS[AWS]
+        MORE[+30 more]
+    end
+
+    H -->|secret values| KC
+    A -->|orchestrate| MCP
+    MCP --> SYNC
+    MCP --> BUDGET
+    MCP --> LEASE
+    KC -->|ctypes| SYNC
+    SYNC -->|stdin/tempfile| V
+    SYNC -->|stdin/tempfile| CF
+    SYNC -->|stdin/tempfile| AWS
+    SYNC -->|stdin/tempfile| MORE
+
+    style Human fill:#0d3222,stroke:#3fb950,color:#3fb950
+    style Agent fill:#1c2636,stroke:#58a6ff,color:#58a6ff
+    style Banto fill:#2d1f00,stroke:#d29922,color:#d29922
+    style Storage fill:#0d3222,stroke:#3fb950,color:#e6edf3
+    style Targets fill:#1c2636,stroke:#58a6ff,color:#e6edf3
+```
+
+## Table of Contents
+
+- [Key features](#key-features)
+- [Why banto?](#why-banto)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [CLI reference](#cli-reference)
+- [MCP server](#mcp-server)
+- [Security](#security)
+- [Python API](#python-api)
+- [Custom backends](#custom-backends)
+- [Configuration](#configuration)
+- [FAQ](#faq)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
 ## Key features
 
 - **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
@@ -576,6 +638,13 @@ Not yet. banto uses macOS Keychain (Security.framework via ctypes). The `SecretB
 <summary><strong>Can I use banto without budget gating?</strong></summary>
 
 Yes. `SecureVault(budget=False)` returns keys directly without cost checks. Budget is opt-in since v4.0.0.
+
+</details>
+
+<details>
+<summary><strong>What's the performance overhead?</strong></summary>
+
+Negligible. banto runs entirely locally — Keychain access via ctypes is sub-millisecond, budget checks read a local JSON file with `fcntl` locking, and sync drivers call platform CLIs directly. There is no remote proxy, no daemon, and no network latency added to key retrieval.
 
 </details>
 
