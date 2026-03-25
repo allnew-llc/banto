@@ -1,30 +1,54 @@
 [日本語](./README.ja.md)
 
-# banto
+<p align="center">
+  <img src="docs/assets/app-icon.png" width="80" alt="banto icon">
+</p>
 
-Local-first secret management with optional budget gating and dynamic leases. API keys are stored in a secure backend (macOS Keychain by default, or 1Password / custom stores) and synced to 33 cloud platforms. Budget mode adds LLM cost control. Note: some commands (`sync run`, `sync export`) intentionally materialize secrets into environment variables or stdout for interoperability.
+<h1 align="center">banto</h1>
 
-> Named after the **bantō** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
+<p align="center">
+  Local-first secret management for AI agents and developers.
+</p>
 
-## Problem
+<p align="center">
+  <img src="https://img.shields.io/badge/version-5.1.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python">
+  <img src="https://img.shields.io/badge/license-Dual%20(Personal%20%2F%20Commercial)-green" alt="license">
+  <img src="https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen" alt="dependencies">
+</p>
 
-Most projects store API keys in `.env` files or environment variables, where processes running as the same user can read them. LLM agents can catch budget-check exceptions and call the API regardless. When agents run unexpectedly, this can result in significant charges.
+> Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
 
-## Solution
-
-banto makes budget enforcement **structural**: API keys are stored in macOS Keychain and only released through banto's API when the budget allows. No budget = no key = no API call through banto.
+banto is a local-first secret management platform built on macOS Keychain. The core stores API keys in Keychain (via ctypes, no argv exposure) and syncs them to 33 cloud platforms. Optional modules add budget gating (hold/settle cost control) and dynamic leases (short-lived credentials with TTL). An MCP server integrates with Claude Code and ChatGPT so AI agents can orchestrate secrets without ever seeing the values.
 
 <p align="center">
   <img src="docs/architecture.svg" alt="banto architecture diagram" width="800">
 </p>
 
+## Key features
+
+- **Keychain-native storage** — ctypes calls to macOS Security framework; secret values never appear in process arguments, temp files, or shell expansions
+- **33 platform sync drivers** — Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify, Render, Railway, Supabase, GitLab, GitHub Actions, CircleCI, Bitbucket, Terraform Cloud, Azure DevOps, Deno Deploy, Hasura, Laravel Forge, DigitalOcean, Alibaba, Tencent, Huawei, Naver, NHN, JD Cloud, Sakura, Volcengine, and more
+- **API key validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing
+- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel)
+- **Browser popup for key registration** — agents call `banto register`; the human enters the value in a localhost browser popup. Agents never see secret values
+- **Optional budget gating** — hold/settle pattern for LLM cost control with global, per-provider, and per-model limits
+- **Dynamic leases** — acquire short-lived credentials with TTL, auto-revoke on expiry
+- **Web dashboard** — localhost-only CRUD interface with CSRF protection (`banto sync ui`)
+- **Fingerprint drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches drift
+- **`--json` output for all commands** — machine-readable output for agent and CI integration
+- **Notification integrations** — Slack, Microsoft Teams, Datadog Events, PagerDuty
+- **Zero runtime dependencies** — stdlib only (ctypes is part of stdlib); MCP server requires optional `mcp` package
+
 ## Requirements
 
 - macOS (uses Keychain for secret storage)
 - Python 3.10+
-- No external dependencies
+- No external dependencies (MCP server: `pip install banto[mcp]`)
 
-## Install
+## Quick start
+
+### 1. Install
 
 ```bash
 pip install banto
@@ -38,80 +62,184 @@ cd banto
 pip install -e .
 ```
 
-## Quick start
-
-### 1. Initialize config
+### 2. Initialize config
 
 ```bash
-banto init    # copies default config to ~/.config/banto/
+banto init          # creates ~/.config/banto/config.json and pricing.json
 ```
 
-### 2. Set your monthly budget
-
-The default budget is **$0 (USD)**. Please set your own budget. While the budget remains at $0, all API key retrieval is blocked.
+### 3. Register an API key
 
 ```bash
-banto budget 50    # set global monthly limit to $50 USD
+banto register openai    # opens browser popup — enter your key there
 ```
 
-All budgets are denominated in **US dollars (USD)** and enforced on a **calendar month** basis. The budget resets automatically on the 1st of each month.
-
-### 3. Store API keys
-
-Register your API keys in macOS Keychain. Run `banto store <provider>` for each provider you use. You will be prompted to enter the key — input is masked and not displayed on screen.
-
-```
-$ banto store openai
-Enter API key for 'openai':    ← paste your key here (input is hidden)
-Stored 'openai' in Keychain.
-```
-
-If a key already exists for the provider, you will be asked whether to overwrite:
-
-```
-$ banto store openai
-Key for 'openai' already exists. Overwrite? (y/N): y
-Enter API key for 'openai':
-Stored 'openai' in Keychain.
-```
-
-You can find your API keys at each provider's dashboard:
-
-- **OpenAI**: https://platform.openai.com/api-keys
-- **Google**: https://aistudio.google.com/apikey
-- **Anthropic**: https://console.anthropic.com/settings/keys
-
-Repeat for each provider:
+Or use the terminal:
 
 ```bash
-banto store openai
-banto store google
-banto store anthropic
+banto store openai       # paste key at masked prompt
 ```
 
-### 4. Use in your code
+### 4. Sync to cloud platforms
+
+```bash
+banto sync init                      # create sync.json
+banto sync add openai --env OPENAI_API_KEY --target vercel:my-project
+banto sync push                      # push to all targets
+```
+
+### 5. (Optional) Set a budget
+
+```bash
+banto budget 100                     # $100/month global limit
+banto budget --provider openai 30    # $30/month for OpenAI
+```
+
+## CLI reference
+
+### Core commands
+
+| Command | Description |
+|---------|-------------|
+| `banto status` | Budget status with per-provider/model breakdown |
+| `banto budget [amount]` | View or set budget limits (global, provider, model) |
+| `banto profile [name]` | Show or set the active model profile (quality/balanced/budget) |
+| `banto store <provider>` | Store an API key in Keychain (terminal prompt) |
+| `banto register [provider]` | Open browser popup to store an API key |
+| `banto delete <provider>` | Delete an API key from Keychain |
+| `banto list` | List stored keys and budget summary |
+| `banto check <model> ...` | Dry-run budget check (`--tokens`, `--n`, `--seconds`, `--quality`, `--size`) |
+| `banto init` | Copy default config to `~/.config/banto/` |
+
+### Sync commands
+
+| Command | Description |
+|---------|-------------|
+| `banto sync init` | Create default `sync.json` config |
+| `banto sync status` | Sync status matrix (secrets x targets) |
+| `banto sync push [name]` | Push secrets from Keychain to targets (`--validate` for pre-push check) |
+| `banto sync add <name>` | Add a new secret (`--env`, `--target platform:project`) |
+| `banto sync rotate <name>` | Rotate a secret interactively or via `--from-cli '<command>'` |
+| `banto sync audit` | Drift detection: existence, fingerprint, file mismatch, staleness (`--max-age-days N`) |
+| `banto sync validate` | Test keys against provider endpoints (`--keychain`, `--dry-run`) |
+| `banto sync history <name>` | Show version history with fingerprints |
+| `banto sync run [--env E] -- <cmd>` | Run a command with secrets injected as env vars |
+| `banto sync export` | Export secrets in env/json/docker format (`--format`, `--env`) |
+| `banto sync import <file>` | Import secrets from `.env` or `.json` file |
+| `banto sync ui [--port N]` | Launch localhost web dashboard (default port 8384) |
+
+### Lease commands
+
+| Command | Description |
+|---------|-------------|
+| `banto lease acquire <name>` | Acquire a short-lived credential (`--cmd`, `--revoke-cmd`, `--ttl`) |
+| `banto lease get <lease_id>` | Retrieve credential value (stdout, for piping) |
+| `banto lease revoke <lease_id>` | Explicitly revoke a lease |
+| `banto lease list` | Show active leases with remaining TTL |
+| `banto lease cleanup` | Revoke all expired leases |
+
+### ChatGPT command
+
+| Command | Description |
+|---------|-------------|
+| `banto chatgpt connect` | Start MCP HTTP server + tunnel, print ChatGPT Connector URL (`--ngrok` or `--cloudflared`) |
+
+All commands support `--json` for machine-readable output.
+
+## MCP server
+
+banto exposes an MCP server so AI agents can orchestrate secret management. Agents never receive secret values — all tools return metadata only.
+
+### Claude Code
+
+Add to your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "banto": {
+      "command": "banto-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Requires the optional MCP dependency:
+
+```bash
+pip install banto[mcp]
+```
+
+### ChatGPT
+
+```bash
+banto chatgpt connect
+```
+
+This starts the MCP server in HTTP mode, opens a tunnel (ngrok or cloudflared), and prints a secure Connector URL with a capability token. Paste the URL into ChatGPT's Connector settings.
+
+### Transport modes
+
+```bash
+banto-mcp                              # stdio (Claude Code)
+banto-mcp --transport sse --port 8385  # SSE (dev)
+banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
+```
+
+### Available tools
+
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| `banto_sync_status` | Show sync matrix (secrets x targets) | Read-only |
+| `banto_sync_push` | Push secrets to cloud targets | Modifies cloud state |
+| `banto_sync_audit` | Check drift and staleness | Read-only |
+| `banto_validate` | Validate keys in sync.json | Sends keys to provider APIs |
+| `banto_validate_keychain` | Scan + validate all Keychain keys | Sends keys to provider APIs |
+| `banto_budget_status` | Budget breakdown | Read-only |
+| `banto_register_key` | Open browser popup for key entry | Human enters value |
+| `banto_lease_list` | List active leases | Read-only |
+| `banto_lease_cleanup` | Revoke expired leases | Modifies Keychain |
+
+All tools include OpenAI-compatible annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`).
+
+## Security
+
+- **ctypes Keychain access** — `store()` and `get()` call macOS Security framework directly (SecKeychainAddGenericPassword / SecKeychainFindGenericPassword). No subprocess, no argv exposure
+- **stdin-based sync drivers** — all 33 drivers pass secrets via stdin pipe, tempfile (0600), or `curl -K -` / `-d @file`. Secret values never appear in process arguments
+- **CSRF protection on web UI** — per-session token required on all POST endpoints, Origin header validation, Content-Type enforcement
+- **Capability URLs for ChatGPT** — `banto chatgpt connect` generates a random path token; the URL is the bearer credential
+- **Fail-closed history** — `record()` returns `None` if Keychain write fails; no metadata saved for broken versions
+- **Browser registration popup** — localhost-only (127.0.0.1), random port, single-use; value never echoed back
+- **Validate is opt-in** — `banto sync validate --keychain` requires explicit flag; `--dry-run` available
+- **Lease credential isolation** — lease values stay in Keychain; `lease-state.json` contains only metadata
+
+### Threat model
+
+banto protects against agents that access keys exclusively through banto's API. An agent with direct shell access could query macOS Keychain independently. For defense-in-depth, restrict shell access in your agent runtime.
+
+`sync export` and `sync run` intentionally materialize secrets into environment variables or stdout for interoperability. Do not use these in agent contexts.
+
+## Python API
+
+### With budget gating
 
 ```python
 from banto import SecureVault, BudgetExceededError, KeyNotFoundError
 
-vault = SecureVault(caller="my_app")
+vault = SecureVault(caller="my_app", budget=True)
 
 try:
-    # Budget hold + key retrieval (estimated cost reserved upfront)
     key = vault.get_key(
         model="gpt-4o",
         input_tokens=1000,
         output_tokens=500,
     )
-
-    # Use the key
     response = openai.chat.completions.create(
         model="gpt-4o",
         messages=[...],
         api_key=key,
     )
-
-    # Settle with actual usage (frees surplus budget)
     vault.record_usage(
         model="gpt-4o",
         input_tokens=response.usage.prompt_tokens,
@@ -119,167 +247,41 @@ try:
         provider="openai",
         operation="chat",
     )
-
 except BudgetExceededError as e:
     print(f"Over budget: ${e.remaining:.2f} remaining of ${e.limit:.2f}")
-
 except KeyNotFoundError as e:
     print(f"No key for {e.provider}. Run: banto store {e.provider}")
 ```
 
-## CLI
+### Without budget (key storage + sync only)
 
-```bash
-banto status              # Budget status (with per-provider/model breakdown)
-banto budget [args]       # View or set budget limits
-banto store <provider>    # Store API key in Keychain
-banto delete <provider>   # Delete API key from Keychain
-banto list                # List stored keys + budget
-banto check <model> ...   # Dry-run budget check
-banto init                # Initialize user config
+```python
+from banto import SecureVault
+
+vault = SecureVault(caller="my_app", budget=False)
+key = vault.get_key(provider="openai")
+# Use key directly — no cost tracking
 ```
 
-### Budget management
+### Auto-detect mode (default)
 
-```bash
-# View all limits
-banto budget
-
-# Set global monthly limit
-banto budget 100
-
-# Set per-provider limit
-banto budget --provider openai 30
-
-# Set per-model limit
-banto budget --model dall-e-3 10
-
-# Remove a limit
-banto budget --provider openai --remove
+```python
+vault = SecureVault(caller="my_app")
+# budget=None: auto-detects from config
+# Enabled when monthly_limit_usd > 0, disabled otherwise
 ```
 
-### Budget check examples
+### CostGuard (budget tracking without secret storage)
 
-```bash
-# Token-based model
-banto check gpt-4o --tokens 1000 500
+```python
+from banto import CostGuard
 
-# Image generation
-banto check dall-e-3 --n 4 --quality hd --size 1024x1024
-
-# Video generation
-banto check sora-2 --seconds 10
+guard = CostGuard(caller="my_mcp")
+hold_id = guard.hold_budget(model="dall-e-3", provider="openai",
+                            n=1, quality="standard", size="1024x1024")
+# ... call API ...
+guard.settle_hold(hold_id, model="dall-e-3", n=1, provider="openai", operation="image")
 ```
-
-## Configuration
-
-Default config is at `~/.config/banto/`. Run `banto init` to create `config.json` (budget settings) and `pricing.json` (pricing table).
-
-### Budget limit
-
-All budgets are in **USD**, enforced per **calendar month**. The default is `0`. Please set your own budget limit.
-
-```json
-{
-  "monthly_limit_usd": 0
-}
-```
-
-### Provider-to-model mapping
-
-Maps models to providers so `get_key()` knows which Keychain entry to look up:
-
-```json
-{
-  "providers": {
-    "openai": {
-      "models": ["gpt-4o", "dall-e-3", "sora-2"]
-    },
-    "google": {
-      "models": ["gemini-3-pro-image-preview", "imagen-4.0-generate-001"]
-    }
-  }
-}
-```
-
-### Pricing (`pricing.json`)
-
-Pricing is stored in a **separate file** (`~/.config/banto/pricing.json`), independent of budget settings. banto ships with a sample pricing table covering major models from OpenAI, Anthropic, and Google as of March 2026.
-
-> **Prices are static and not guaranteed.** banto does not fetch pricing from provider APIs at runtime. None of the major providers (OpenAI, Anthropic, xAI) offer a public API endpoint that returns per-model pricing rates. Verify rates at each provider's official pricing page and update `pricing.json` accordingly. AllNew LLC assumes no liability for inaccuracies in the pricing table.
-
-When providers change their pricing, edit `~/.config/banto/pricing.json`. To add a new model, add an entry to both `providers` in `config.json` (for key resolution) and `pricing.json` (for cost calculation).
-
-Three pricing types are supported:
-
-```json
-{
-  "gpt-4o": {
-    "type": "per_token",
-    "input_per_1k": 0.0025,
-    "output_per_1k": 0.01
-  },
-  "dall-e-3": {
-    "type": "per_image",
-    "variants": {
-      "standard_1024x1024": 0.040,
-      "hd_1024x1024": 0.080
-    },
-    "fallback": 0.120
-  },
-  "sora-2": {
-    "type": "per_second",
-    "rate": 0.10
-  }
-}
-```
-
-## How it works
-
-### Hold/settle pattern
-
-banto uses a **pessimistic reservation** (hold/settle) pattern for budget enforcement:
-
-1. **Hold**: `get_key()` estimates the cost and writes a hold entry to the usage log *before* returning the key. The held amount counts against the budget immediately.
-2. **Settle**: `record_usage()` finds the matching hold and replaces it with the actual cost. If actual < estimated, the surplus budget is freed.
-3. **Safe-side bias**: If `record_usage()` is never called (crash, timeout, bug), the hold stays. The hold pattern is designed to prevent silent budget leakage.
-
-This closes the metering gap where an agent could call `get_key()` but skip `record_usage()`, consuming API resources without being tracked.
-
-### Multi-layer budget enforcement
-
-Three layers are checked on every `get_key()` call (all must pass):
-
-1. **Global limit**: Total monthly spend across all providers/models
-2. **Provider limit**: Per-provider cap (e.g., OpenAI max $30/month)
-3. **Model limit**: Per-model cap (e.g., DALL-E 3 max $10/month)
-
-### Budget tracking
-
-- Usage is logged per-call in `~/.config/banto/data/usage_YYYY_MM.json`
-- Budget resets automatically each month (new file per month)
-- Totals are recalculated from entries on every load (prevents drift)
-- File locking (`fcntl`) provides process-safe concurrent access via exclusive-lock read-modify-write
-
-### Keychain storage
-
-- Keys are stored as generic passwords in the login keychain
-- Service name format: `banto-<provider>` (e.g., `banto-openai`)
-- Uses macOS Security framework via ctypes for store/get — secret values never appear in process arguments
-- `sync export` and `sync run` intentionally output/inject values for interoperability
-- `sync validate --keychain` sends keys to provider endpoints for health checks (opt-in only, not default)
-
-### Budget-gated get_key()
-
-`get_key()` is the central mechanism. It performs three operations in sequence:
-
-1. Check if estimated cost fits within remaining budget (global + provider + model)
-2. Write a hold entry reserving that cost in the usage log
-3. Retrieve the API key from Keychain
-
-If step 1 fails, steps 2-3 never execute. When over budget, the key is inaccessible through banto's API. An LLM agent that uses only banto's `get_key()` has no code path to obtain the key.
-
-> **Threat model note**: banto protects against agents that access keys exclusively through `get_key()`. An agent with direct shell access could query macOS Keychain independently. For defense-in-depth, restrict shell access in your agent runtime.
 
 ## Custom backends
 
@@ -379,72 +381,73 @@ vault = SecureVault(
 
 See [examples/06_custom_backend.py](./examples/06_custom_backend.py) for complete implementations.
 
-## Advanced
+## Configuration
 
-### Custom Keychain prefix
+All config files live in `~/.config/banto/`. Run `banto init` to create defaults.
 
-If you already have keys stored under a different prefix:
+### `config.json` — Budget and provider settings
 
-```python
-vault = SecureVault(
-    caller="my_app",
-    keychain_prefix="claude-mcp",  # uses "claude-mcp-openai" etc.
-)
+```json
+{
+  "monthly_limit_usd": 0,
+  "providers": {
+    "openai": {
+      "models": ["gpt-4o", "dall-e-3", "sora-2"]
+    },
+    "google": {
+      "models": ["gemini-3-pro-image-preview", "imagen-4.0-generate-001"]
+    }
+  }
+}
 ```
 
-### Custom data directory
+Budget is in USD, enforced per calendar month. Default is `0` (budget disabled; keys returned without cost checks). Set a value to enable budget gating.
 
-```python
-vault = SecureVault(
-    caller="my_app",
-    data_dir="/path/to/usage/data",
-)
+### `pricing.json` — Model pricing table
+
+```json
+{
+  "gpt-4o": {
+    "type": "per_token",
+    "input_per_1k": 0.0025,
+    "output_per_1k": 0.01
+  },
+  "dall-e-3": {
+    "type": "per_image",
+    "variants": {
+      "standard_1024x1024": 0.040,
+      "hd_1024x1024": 0.080
+    },
+    "fallback": 0.120
+  },
+  "sora-2": {
+    "type": "per_second",
+    "rate": 0.10
+  }
+}
 ```
 
-### Explicit provider
+Prices are static. banto does not fetch pricing from provider APIs at runtime. Verify rates at each provider's official pricing page and update `pricing.json` accordingly.
 
-When the model isn't in the config's provider mapping:
+### `sync.json` — Multi-platform sync config
 
-```python
-key = vault.get_key(
-    model="my-custom-model",
-    provider="openai",
-    input_tokens=1000,
-    output_tokens=500,
-)
+```json
+{
+  "version": 1,
+  "keychain_service": "banto-sync",
+  "secrets": {},
+  "environments": {
+    "dev": {},
+    "prd": { "inherits": "dev" }
+  }
+}
 ```
 
-### Using CostGuard directly (without secret storage)
-
-For budget tracking only, with hold/settle:
-
-```python
-from banto import CostGuard, BudgetExceededError
-
-guard = CostGuard(caller="my_mcp")
-
-# Hold budget (reserves estimated cost)
-hold_id = guard.hold_budget(model="dall-e-3", provider="openai",
-                            n=1, quality="standard", size="1024x1024")
-# ... call API ...
-
-# Settle with actual cost
-guard.settle_hold(hold_id, model="dall-e-3", n=1, provider="openai", operation="image")
-```
-
-Or use check + record without holds (backward compatible):
-
-```python
-guard.check_budget(model="dall-e-3", n=1, quality="standard", size="1024x1024")
-# ... call API ...
-guard.record_usage(model="dall-e-3", n=1, provider="openai", operation="image")
-```
+Created by `banto sync init`. Contains metadata only — no secret values.
 
 ## Disclaimer
 
 banto is a budget management aid, not a guarantee against excessive API charges. The authors shall not be liable for any financial losses arising from inaccurate pricing tables, software defects, configuration errors, or agents that bypass banto's API. Users are solely responsible for monitoring actual API spend through each provider's billing dashboard and for keeping the pricing table up to date.
-
-See [LICENSE](./LICENSE) for full terms.
 
 ## License
 
