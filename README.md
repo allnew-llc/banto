@@ -112,16 +112,15 @@ Cloudflare, Vercel, AWS, GCP, Azure, Kubernetes, Docker, Heroku, Fly.io, Netlify
 Most secret managers require you to manually configure every secret in every platform. banto lets your AI agent do it:
 
 ```
-You:   "Deploy my secrets to allnew-corporate on Vercel."
+You:   "Deploy my secrets to my-project on Vercel."
 
-Agent: → banto_sync_setup(platform="vercel", project="allnew-corporate")
-         ✓ OPENAI_API_KEY → claude-mcp-openai (matched)
-         ✓ LINE_CHANNEL_ACCESS_TOKEN → line-clawboy-channel-token (matched)
-         ✗ POSTGRES_URL (not in Keychain — opening browser for you to enter)
-       → banto_register_key(provider="postgres")
-         [Browser popup opens — you paste the value]
+Agent: → banto_sync_setup(platform="vercel", project="my-project")
+         ✓ 3 keys matched from Keychain
+         ✗ 1 key missing — opening browser for you to enter
+       → banto_register_key(provider="database")
+         [Browser popup opens — you enter the value]
        → banto_sync_push()
-         3 secrets pushed to Vercel.
+         4 secrets pushed to Vercel.
 
 You:   Done.
 ```
@@ -133,16 +132,16 @@ This is possible because banto's architecture separates _what to do_ (agent-safe
 ### Terminal output: `sync setup`
 
 ```
-$ banto sync setup vercel:allnew-corporate --dry-run
+$ banto sync setup vercel:my-project --dry-run
 
-BANTO SYNC SETUP — vercel:allnew-corporate
+BANTO SYNC SETUP — vercel:my-project
 
   (dry run — no changes will be made)
 
-  MATCH  OPENAI_API_KEY -> claude-mcp-openai
-  MATCH  ANTHROPIC_API_KEY -> claude-mcp-anthropic
-  MATCH  LINE_CHANNEL_ACCESS_TOKEN -> line-clawboy-channel-token
-  MISS   POSTGRES_URL (no Keychain match)
+  MATCH  OPENAI_API_KEY -> openai
+  MATCH  ANTHROPIC_API_KEY -> anthropic
+  MATCH  GITHUB_TOKEN -> github
+  MISS   DATABASE_URL (no Keychain match)
 
   Would register 3 secret(s). Remove --dry-run to apply.
 ```
@@ -152,12 +151,12 @@ BANTO SYNC SETUP — vercel:allnew-corporate
 ```
 $ banto sync validate --keychain
 
-BANTO SYNC VALIDATE — Testing 8 key(s)
+BANTO SYNC VALIDATE — Testing 4 key(s)
 
-  PASS    claude-mcp-openai: Key valid
-  PASS    claude-mcp-anthropic: Key valid
-  UNKNOWN claude-mcp-xai: Cannot verify (403)
-  PASS    cloudflare-api-token: Token valid
+  PASS    openai: Key valid
+  PASS    anthropic: Key valid
+  UNKNOWN xai: Cannot verify (403)
+  PASS    github: Token valid
 ```
 
 ## 📋 Requirements
