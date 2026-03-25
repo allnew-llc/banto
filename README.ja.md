@@ -209,6 +209,8 @@ banto chatgpt connect
 
 MCPサーバーをHTTPモードで起動し、トンネル（ngrokまたはcloudflared）を開いて、ケイパビリティトークン付きのセキュアなConnector URLを表示します。このURLをChatGPTのConnector設定に貼り付けてください。
 
+> **Developer Modeのみ。** bantoはローカルChatGPT Connectorとしての使用を想定しており、公開App Store提出は対象外です（OpenAIの提出ガイドラインはAPIキーの収集を禁止しています）。トンネルURLにはランダムトークンが含まれます — パスワードと同等に扱ってください。MCPリクエスト/レスポンストラフィックはトンネルプロバイダー（ngrokまたはCloudflare）を経由します。シークレット値はレスポンスに含まれませんが、メタデータ（シークレット名、同期状態）はトンネルを通過する場合があります。
+
 ### トランスポートモード
 
 ```bash

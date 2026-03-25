@@ -209,6 +209,8 @@ banto chatgpt connect
 
 This starts the MCP server in HTTP mode, opens a tunnel (ngrok or cloudflared), and prints a secure Connector URL with a capability token. Paste the URL into ChatGPT's Connector settings.
 
+> **Developer Mode only.** banto is designed for use as a local ChatGPT Connector, not for public App Store submission (OpenAI's submission guidelines prohibit collecting API keys). The tunnel URL contains a random token — treat it like a password. MCP request/response traffic is proxied through the tunnel provider (ngrok or Cloudflare); secret values are never included in responses, but metadata (secret names, sync status) may transit.
+
 ### Transport modes
 
 ```bash
