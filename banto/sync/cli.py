@@ -842,6 +842,7 @@ def cmd_sync_setup(args: list[str]) -> None:
 
     config, config_path = _load_config(args)
     dry_run = "--dry-run" in args
+    guess = "--guess" in args
 
     # Parse platform:project
     target = None
@@ -851,9 +852,10 @@ def cmd_sync_setup(args: list[str]) -> None:
             break
 
     if not target:
-        print("Usage: banto sync setup <platform:project> [--dry-run] [--json]")
+        print("Usage: banto sync setup <platform:project> [--dry-run] [--guess] [--json]")
         print("Example: banto sync setup vercel:allnew-corporate")
         print("         banto sync setup cloudflare-pages:my-site --dry-run")
+        print("         banto sync setup vercel:my-app --guess  # fallback to known env vars")
         sys.exit(1)
 
     platform, project = target.split(":", 1)
@@ -861,16 +863,35 @@ def cmd_sync_setup(args: list[str]) -> None:
     print(f"\nBANTO SYNC SETUP — {platform}:{project}\n")
     if dry_run:
         print("  (dry run — no changes will be made)\n")
+    if guess:
+        print("  (guess mode — using known env var catalog as fallback)\n")
 
     matches = run_setup(
         platform=platform, project=project,
         config=config, config_path=config_path,
         dry_run=dry_run,
+        guess=guess,
     )
+
+    # Handle discovery_empty (fail-closed)
+    if len(matches) == 1 and matches[0].status == "discovery_empty":
+        if _is_json(args):
+            _json_out({
+                "platform": platform, "project": project, "dry_run": dry_run,
+                "status": "discovery_empty",
+                "matches": [],
+            })
+            sys.exit(1)
+        print(f"  No env vars discovered on {platform}:{project}.")
+        print(f"  This may indicate an auth issue, wrong project name, or empty project.")
+        print(f"\n  To fall back to known env var catalog, re-run with --guess:")
+        print(f"    banto sync setup {platform}:{project} --guess")
+        sys.exit(1)
 
     if _is_json(args):
         _json_out({
             "platform": platform, "project": project, "dry_run": dry_run,
+            "guess": guess,
             "matches": [
                 {"env_var": m.env_var, "keychain": m.keychain_service, "status": m.status}
                 for m in matches

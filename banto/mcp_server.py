@@ -460,23 +460,47 @@ async def banto_budget_status() -> dict:
     "destructiveHint": False,
     "openWorldHint": False,
 })
-async def banto_sync_setup(platform: str, project: str, dry_run: bool = False) -> dict:
+async def banto_sync_setup(
+    platform: str, project: str, dry_run: bool = False, guess: bool = False,
+) -> dict:
     """Auto-detect env vars on a platform and match to Keychain entries.
 
-    One command to configure sync for an entire project. Scans the platform
-    for existing env var names, matches them to Keychain entries, and
-    registers the mappings in sync.json.
+    Scans the platform for existing env var names, matches them to Keychain
+    entries, and registers the mappings in sync.json.
+
+    If discovery returns no results, fails closed by default. Set guess=True
+    to fall back to a known env var catalog (best-effort, not project-scoped).
 
     Args:
         platform: Target platform (e.g. "vercel", "cloudflare-pages").
         project: Project name on the platform.
         dry_run: If true, show what would be configured without changing anything.
+        guess: If true, fall back to known env var catalog when discovery is empty.
 
     Example: banto_sync_setup(platform="vercel", project="allnew-corporate")
     """
     from .sync.setup import run_setup
 
-    matches = run_setup(platform=platform, project=project, dry_run=dry_run)
+    matches = run_setup(
+        platform=platform, project=project, dry_run=dry_run, guess=guess,
+    )
+
+    # Handle discovery_empty (fail-closed)
+    if len(matches) == 1 and matches[0].status == "discovery_empty":
+        return {
+            "structuredContent": {
+                "platform": platform,
+                "project": project,
+                "status": "discovery_empty",
+                "results": [],
+            },
+            "content": (
+                f"No env vars discovered on {platform}:{project}. "
+                f"This may indicate an auth issue, wrong project name, or empty project. "
+                f"Set guess=True to fall back to known env var catalog."
+            ),
+            "isError": True,
+        }
 
     matched = [m for m in matches if m.status == "matched"]
     missing = [m for m in matches if m.status == "missing"]
@@ -501,6 +525,7 @@ async def banto_sync_setup(platform: str, project: str, dry_run: bool = False) -
             "platform": platform,
             "project": project,
             "dry_run": dry_run,
+            "guess": guess,
             "matched": len(matched),
             "missing": len(missing),
             "already_configured": len(existing),
