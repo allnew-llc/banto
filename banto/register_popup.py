@@ -47,10 +47,21 @@ PROVIDER_PRESETS: dict[str, str] = {
 }
 
 
+def _safe_attr(value: str) -> str:
+    """Escape a value for safe embedding in an HTML attribute."""
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("'", "&#x27;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 def _build_html(provider_hint: str | None = None) -> str:
     """Build the single-page HTML for the registration form."""
     presets_json = json.dumps(PROVIDER_PRESETS)
-    hint_json = json.dumps(provider_hint or "")
+    hint_attr = _safe_attr(provider_hint or "")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -262,7 +273,7 @@ def _build_html(provider_hint: str | None = None) -> str:
     <div class="logo-sub">Store API Key in Keychain</div>
   </div>
 
-  <form id="form" autocomplete="off">
+  <form id="form" autocomplete="off" data-hint="{hint_attr}">
     <div class="field">
       <label for="provider">Provider</label>
       <select id="provider">
@@ -314,7 +325,8 @@ def _build_html(provider_hint: str | None = None) -> str:
       <label for="api-key">API Key</label>
       <div class="key-wrap">
         <input type="text" id="api-key" class="key-masked"
-               placeholder="sk-..." autocomplete="off" spellcheck="false">
+               placeholder="sk-..." autocomplete="off"
+               spellcheck="false" autocorrect="off" autocapitalize="off">
         <button type="button" class="toggle-vis" id="toggle-vis"
                 aria-label="Toggle visibility">&#x25CF;</button>
       </div>
@@ -335,7 +347,7 @@ def _build_html(provider_hint: str | None = None) -> str:
 <script>
 (function() {{
   const PRESETS = {presets_json};
-  const HINT = {hint_json};
+  const HINT = document.getElementById("form").dataset.hint || "";
 
   const providerEl   = document.getElementById("provider");
   const customField   = document.getElementById("custom-provider-field");
@@ -348,9 +360,13 @@ def _build_html(provider_hint: str | None = None) -> str:
   const resultEl      = document.getElementById("result");
   const toggleBtn     = document.getElementById("toggle-vis");
 
-  // Apply hint — if it matches a preset, select it; otherwise use Custom
+  // Apply hint — if it matches a preset, select it; otherwise use Custom.
+  // HINT comes from a data-attribute (HTML-escaped), never inline JS.
   if (HINT) {{
-    if (providerEl.querySelector('option[value="' + HINT + '"]')) {{
+    const matched = Array.from(providerEl.options).some(function(o) {{
+      return o.value === HINT;
+    }});
+    if (matched) {{
       providerEl.value = HINT;
       onProviderChange();
     }} else {{
