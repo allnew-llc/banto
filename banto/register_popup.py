@@ -21,18 +21,29 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 from .keychain import KeychainStore, _validate_provider
+from .sync.config import SyncConfig
 
-# Provider -> default env var name mapping
+# Provider -> default env var name mapping.
+# Keep in sync with setup.py ENV_TO_KEYCHAIN.
 PROVIDER_PRESETS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "google": "GOOGLE_API_KEY",
     "github": "GITHUB_TOKEN",
     "cloudflare": "CLOUDFLARE_API_TOKEN",
     "xai": "XAI_API_KEY",
+    "line-channel-token": "LINE_CHANNEL_ACCESS_TOKEN",
+    "line-channel-secret": "LINE_CHANNEL_SECRET",
+    "line-owner-user-id": "LINE_OWNER_USER_ID",
+    "azure-client-id": "AZURE_CLIENT_ID",
+    "azure-client-secret": "AZURE_CLIENT_SECRET",
+    "azure-tenant-id": "AZURE_TENANT_ID",
     "aws-access": "AWS_ACCESS_KEY_ID",
     "aws-secret": "AWS_SECRET_ACCESS_KEY",
     "stripe": "STRIPE_SECRET_KEY",
+    "sendgrid": "SENDGRID_API_KEY",
+    "database-url": "DATABASE_URL",
 }
 
 
@@ -106,7 +117,7 @@ def _build_html(provider_hint: str | None = None) -> str:
     margin-bottom: 6px;
   }}
 
-  select, input[type="text"], input[type="password"], textarea {{
+  select, input[type="text"], textarea {{
     width: 100%;
     padding: 10px 14px;
     font-size: 14px;
@@ -143,6 +154,14 @@ def _build_html(provider_hint: str | None = None) -> str:
     font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
     font-size: 13px;
     letter-spacing: 0.3px;
+  }}
+
+  /* Mask API key text without type="password" to prevent browser
+     password managers (especially Safari) from auto-saving to
+     iCloud Keychain as an Internet Password. */
+  .key-masked {{
+    -webkit-text-security: disc;
+    text-security: disc;
   }}
 
   .toggle-vis {{
@@ -248,15 +267,32 @@ def _build_html(provider_hint: str | None = None) -> str:
       <label for="provider">Provider</label>
       <select id="provider">
         <option value="">Select a provider...</option>
-        <option value="openai">OpenAI</option>
-        <option value="anthropic">Anthropic</option>
-        <option value="gemini">Google Gemini</option>
-        <option value="github">GitHub</option>
-        <option value="cloudflare">Cloudflare</option>
-        <option value="xai">xAI (Grok)</option>
-        <option value="aws-access">AWS Access Key</option>
-        <option value="aws-secret">AWS Secret Key</option>
-        <option value="stripe">Stripe</option>
+        <optgroup label="AI / LLM">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="google">Google API</option>
+          <option value="xai">xAI (Grok)</option>
+        </optgroup>
+        <optgroup label="Cloud / Infra">
+          <option value="aws-access">AWS Access Key</option>
+          <option value="aws-secret">AWS Secret Key</option>
+          <option value="azure-client-id">Azure Client ID</option>
+          <option value="azure-client-secret">Azure Client Secret</option>
+          <option value="azure-tenant-id">Azure Tenant ID</option>
+          <option value="cloudflare">Cloudflare</option>
+        </optgroup>
+        <optgroup label="Developer Tools">
+          <option value="github">GitHub</option>
+          <option value="stripe">Stripe</option>
+          <option value="sendgrid">SendGrid</option>
+          <option value="database-url">Database URL</option>
+        </optgroup>
+        <optgroup label="LINE">
+          <option value="line-channel-token">LINE Channel Token</option>
+          <option value="line-channel-secret">LINE Channel Secret</option>
+          <option value="line-owner-user-id">LINE Owner User ID</option>
+        </optgroup>
         <option value="_custom">Custom...</option>
       </select>
     </div>
@@ -277,7 +313,7 @@ def _build_html(provider_hint: str | None = None) -> str:
     <div class="field">
       <label for="api-key">API Key</label>
       <div class="key-wrap">
-        <input type="password" id="api-key"
+        <input type="text" id="api-key" class="key-masked"
                placeholder="sk-..." autocomplete="off" spellcheck="false">
         <button type="button" class="toggle-vis" id="toggle-vis"
                 aria-label="Toggle visibility">&#x25CF;</button>
@@ -312,10 +348,17 @@ def _build_html(provider_hint: str | None = None) -> str:
   const resultEl      = document.getElementById("result");
   const toggleBtn     = document.getElementById("toggle-vis");
 
-  // Apply hint
-  if (HINT && providerEl.querySelector('option[value="' + HINT + '"]')) {{
-    providerEl.value = HINT;
-    onProviderChange();
+  // Apply hint — if it matches a preset, select it; otherwise use Custom
+  if (HINT) {{
+    if (providerEl.querySelector('option[value="' + HINT + '"]')) {{
+      providerEl.value = HINT;
+      onProviderChange();
+    }} else {{
+      providerEl.value = "_custom";
+      customField.style.display = "";
+      customEl.value = HINT;
+      envNameEl.value = "";
+    }}
   }}
 
   providerEl.addEventListener("change", onProviderChange);
@@ -333,11 +376,16 @@ def _build_html(provider_hint: str | None = None) -> str:
     }}
   }}
 
-  // Toggle password visibility
+  // Toggle key visibility via CSS class (not type="password" which
+  // triggers Safari's iCloud Keychain auto-save)
   let visible = false;
   toggleBtn.addEventListener("click", function() {{
     visible = !visible;
-    apiKeyEl.type = visible ? "text" : "password";
+    if (visible) {{
+      apiKeyEl.classList.remove("key-masked");
+    }} else {{
+      apiKeyEl.classList.add("key-masked");
+    }}
     toggleBtn.textContent = visible ? "\\u25CB" : "\\u25CF";
   }});
 
@@ -558,7 +606,8 @@ def serve_register_popup(
         The URL of the popup (e.g. "http://127.0.0.1:54321").
     """
     html = _build_html(provider_hint)
-    keychain = KeychainStore()
+    config = SyncConfig.load()
+    keychain = KeychainStore(service_prefix=config.keychain_service)
     csrf_token = secrets.token_urlsafe(32)
 
     # Build a handler class with our state
