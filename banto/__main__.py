@@ -31,6 +31,7 @@ def _json_out(data: dict | list) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
 from .keychain import KeychainStore, _validate_provider
 from .profiles import ProfileManager
+from .sync.config import SyncConfig
 from .vault import SecureVault
 
 
@@ -152,7 +153,8 @@ def cmd_store(args: list[str]) -> None:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-    keychain = KeychainStore()
+    config = SyncConfig.load()
+    keychain = KeychainStore(service_prefix=config.keychain_service)
 
     if keychain.exists(provider):
         overwrite = input(
@@ -184,7 +186,8 @@ def cmd_delete(args: list[str]) -> None:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-    keychain = KeychainStore()
+    config = SyncConfig.load()
+    keychain = KeychainStore(service_prefix=config.keychain_service)
 
     if not keychain.exists(provider):
         print(f"No key found for '{provider}'.")
