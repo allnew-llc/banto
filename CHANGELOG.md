@@ -1,5 +1,24 @@
 # Changelog
 
+## 5.2.0 (2026-03-26) — sync setup Security Hardening
+
+Addresses findings from independent security and legal re-audit (March 25, 2026).
+
+### Security
+
+- **Fail-closed discovery**: `sync setup` no longer silently falls back to the full env var catalog when platform discovery returns empty. Returns `discovery_empty` status and suggests `--guess` flag for explicit fallback
+- **Project-scoped Vercel queries**: `_list_vercel_env_vars()` now passes `--project <name>` to scope queries to the requested project, preventing cross-project secret deployment risk
+- **Excluded service policy shared**: `gh:github.com` removed from `ENV_TO_KEYCHAIN`. `_find_keychain_match()` now consults `EXCLUDED_SERVICES` and `EXCLUDED_PATTERNS` from `validate.py`, ensuring OAuth/session tokens cannot be auto-registered via setup
+
+### Documentation
+
+- **README (EN/JA)**: Updated `sync setup` descriptions to accurately reflect project-scoped platform queries. Added note about fail-closed behavior and `--guess` flag
+- **Privacy Policy (EN/JA)**: Added `sync setup` section to the external-communication disclosure list. Documents that only env var names (metadata) are retrieved, not secret values
+
+### Testing
+
+- **17 new tests** for `setup.py`: coverage for `_is_excluded`, `_find_keychain_match`, `_list_vercel_env_vars`, `run_setup` (fail-closed, guess mode, scanner results, already-configured, unknown platform), and `ENV_TO_KEYCHAIN` ↔ `EXCLUDED_SERVICES` consistency
+
 ## 5.1.0 (2026-03-25) — Security Hardening + ChatGPT Connector
 
 ### Security

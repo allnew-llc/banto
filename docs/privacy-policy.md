@@ -20,6 +20,9 @@ The only data banto stores is:
 
 banto does not automatically share any data with third parties. The following user-initiated actions involve external communication:
 
+### sync setup (User-Initiated)
+When you explicitly run `sync setup` or use the `banto_sync_setup` tool, banto invokes platform CLI tooling (e.g., `vercel env ls`, `wrangler pages secret list`) on your device to retrieve **environment variable names** from the specified project. No secret values are sent or received during this operation — only metadata (variable names, project identifiers) is exchanged between your device and the platform's CLI service. The retrieved variable names are then matched against local Keychain entries; matches are recorded in `sync.json` (which contains only Keychain account references, not secret values).
+
 ### sync push (User-Initiated)
 When you explicitly run `sync push` or use the `banto_sync_push` tool, banto sends secret values from your macOS Keychain directly to cloud platforms you have configured (e.g., Vercel, Cloudflare Workers, AWS, etc.). This is a deliberate deployment action. banto acts as a transport; it does not store, cache, or log the values in transit.
 
@@ -130,6 +133,9 @@ bantoが保存するデータ:
 ## 2. 第三者へのデータ共有
 
 bantoは自動的に第三者とデータを共有することはありません。以下のユーザー起動アクションは外部との通信を伴います。
+
+### sync setup（ユーザー起動）
+`sync setup` コマンドまたは `banto_sync_setup` ツールを明示的に実行すると、bantoはプラットフォームCLIツール（例: `vercel env ls`、`wrangler pages secret list`）をデバイス上で実行し、指定されたプロジェクトから**環境変数名**を取得します。この操作でシークレット値の送受信は行われません。デバイスとプラットフォームのCLIサービス間でやり取りされるのはメタデータ（変数名、プロジェクト識別子）のみです。取得した変数名はローカルのキーチェーンエントリとマッチングされ、一致した結果は `sync.json`（キーチェーンアカウント参照のみ、シークレット値は含まない）に記録されます。
 
 ### sync push（ユーザー起動）
 `sync push` コマンドまたは `banto_sync_push` ツールを明示的に実行すると、bantoはmacOSキーチェーンから設定済みのクラウドプラットフォーム（Vercel、Cloudflare Workers、AWSなど）へシークレット値を直接送信します。これは意図的なデプロイ操作です。bantoは転送手段として機能し、転送中の値を保存、キャッシュ、またはログに記録しません。

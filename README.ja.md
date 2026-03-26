@@ -88,7 +88,7 @@ graph LR
 ## 🔑 主な機能
 
 - **33+ プラットフォーム同期** — 1コマンドで Vercel、Cloudflare、AWS、GCP、Azure、Kubernetes、GitHub Actions など 33 以上にシークレットをデプロイ。ダッシュボード操作不要
-- **ワンコマンドセットアップ** — `banto sync setup vercel:my-project` で環境変数を自動検出し、Keychainエントリとマッチングして一発で設定完了
+- **ワンコマンドセットアップ** — `banto sync setup vercel:my-project` でプラットフォームに環境変数名を問い合わせ、Keychainエントリとマッチングして設定。検出結果が空の場合は `--guess` で既知カタログにフォールバック
 - **AIエージェント連携** — ClaudeやChatGPTに _「Vercelにシークレットを同期して」_ と指示するだけ。エージェントがオーケストレーションし、値はブラウザポップアップで入力。チャットに値が入ることはありません
 - **プッシュ前検証** — 6つのプロバイダ（OpenAI、Anthropic、Gemini、GitHub、Cloudflare、xAI）に対してキーの有効性をチェックし、無効なキーの配信を防止
 - **ドリフト検出** — SHA-256フィンガープリントでKeychainの変更を追跡。`banto sync audit` でデプロイ済みシークレットの陳腐化を検知
@@ -140,11 +140,13 @@ BANTO SYNC SETUP — vercel:my-project
 
   MATCH  OPENAI_API_KEY -> openai
   MATCH  ANTHROPIC_API_KEY -> anthropic
-  MATCH  GITHUB_TOKEN -> github
+  MATCH  GITHUB_TOKEN -> claude-mcp-github
   MISS   DATABASE_URL (no Keychain match)
 
   Would register 3 secret(s). Remove --dry-run to apply.
 ```
+
+> **注意:** `sync setup` はプラットフォームCLI（例: `vercel env ls --project <name>`）に環境変数名を問い合わせます。検出結果が空の場合（認証問題、プロジェクト名の誤り、空のプロジェクト）、コマンドは安全側に倒れて停止し、`--guess` による既知カタログへのフォールバックを提案します。
 
 ### ターミナル出力例: `sync validate`
 
@@ -191,11 +193,11 @@ pip install banto[mcp]
 ### 2. プラットフォームに同期 — 1コマンド
 
 ```bash
-banto sync setup vercel:my-project   # 環境変数を自動検出 + Keychainマッチ
+banto sync setup vercel:my-project   # プラットフォームに問い合わせ + Keychainマッチ
 banto sync push                      # 全ターゲットにデプロイ
 ```
 
-これだけ。bantoがKeychainのキーを見つけ、環境変数にマッピングし、プッシュします。
+これだけ。bantoがプラットフォームから環境変数名を取得し、Keychainエントリとマッチングし、プッシュします。
 
 またはAIエージェントに依頼:
 
@@ -247,7 +249,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 
 | コマンド | 説明 |
 |---------|------|
-| `banto sync setup <plat:proj>` | 環境変数を自動検出 + Keychainマッチングでワンコマンド設定（`--dry-run`） |
+| `banto sync setup <plat:proj>` | プラットフォームに環境変数を問い合わせ + Keychainマッチング（`--dry-run`、`--guess`） |
 | `banto sync init` | デフォルトの `sync.json` を作成 |
 | `banto sync status` | 同期ステータスマトリクス（シークレット x ターゲット） |
 | `banto sync push [name]` | Keychainからターゲットにシークレットをプッシュ（`--validate` でプッシュ前チェック） |

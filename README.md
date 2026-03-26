@@ -88,7 +88,7 @@ graph LR
 ## 🔑 Key features
 
 - **33+ platform sync** — one command deploys secrets to Vercel, Cloudflare, AWS, GCP, Azure, Kubernetes, GitHub Actions, and 26 more. No dashboard clicking
-- **One-command setup** — `banto sync setup vercel:my-project` auto-detects env vars, matches Keychain entries, and configures everything in one step
+- **One-command setup** — `banto sync setup vercel:my-project` queries the platform for env var names, matches Keychain entries, and configures sync. Falls back to known env var catalog only with `--guess`
 - **AI agent integration** — tell Claude or ChatGPT _"sync my secrets to Vercel"_ and it's done. Agents orchestrate; humans provide values via browser popup. Values never enter the chat
 - **Pre-push validation** — health-check keys against 6 provider endpoints (OpenAI, Anthropic, Gemini, GitHub, Cloudflare, xAI) before pushing to catch invalid keys early
 - **Drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches when your deployed secrets are out of date
@@ -140,11 +140,13 @@ BANTO SYNC SETUP — vercel:my-project
 
   MATCH  OPENAI_API_KEY -> openai
   MATCH  ANTHROPIC_API_KEY -> anthropic
-  MATCH  GITHUB_TOKEN -> github
+  MATCH  GITHUB_TOKEN -> claude-mcp-github
   MISS   DATABASE_URL (no Keychain match)
 
   Would register 3 secret(s). Remove --dry-run to apply.
 ```
+
+> **Note:** `sync setup` queries the platform CLI (e.g. `vercel env ls --project <name>`) for env var names. If discovery returns nothing (auth issue, wrong project name, or empty project), the command fails closed and suggests re-running with `--guess` to fall back to a known env var catalog.
 
 ### Terminal output: `sync validate`
 
@@ -191,11 +193,11 @@ pip install banto[mcp]
 ### 2. Sync to a platform — one command
 
 ```bash
-banto sync setup vercel:my-project   # auto-detect env vars + match Keychain
+banto sync setup vercel:my-project   # query platform + match Keychain
 banto sync push                      # deploy to all targets
 ```
 
-That's it. banto finds your keys in Keychain, maps them to env vars, and pushes.
+That's it. banto queries the platform for env var names, matches them to Keychain entries, and pushes.
 
 Or just tell your AI agent:
 
@@ -247,7 +249,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 | Command | Description |
 |---------|-------------|
-| `banto sync setup <plat:proj>` | Auto-detect env vars + match Keychain entries in one command (`--dry-run`) |
+| `banto sync setup <plat:proj>` | Query platform for env vars + match Keychain entries (`--dry-run`, `--guess`) |
 | `banto sync init` | Create default `sync.json` config |
 | `banto sync status` | Sync status matrix (secrets x targets) |
 | `banto sync push [name]` | Push secrets from Keychain to targets (`--validate` for pre-push check) |

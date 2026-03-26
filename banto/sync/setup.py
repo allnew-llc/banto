@@ -12,14 +12,13 @@ Supports: vercel, cloudflare-pages (extensible).
 """
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..keychain import KeychainStore
 from .config import DEFAULT_CONFIG_PATH, SecretEntry, SyncConfig, Target
+from .validate import EXCLUDED_SERVICES, EXCLUDED_PATTERNS
 
 
 # ── Env var → Keychain service name mapping ──────────────────────
@@ -35,7 +34,7 @@ ENV_TO_KEYCHAIN: list[tuple[str, list[str]]] = [
     ("GEMINI_API_KEY", ["claude-mcp-gemini", "banto-gemini", "gemini"]),
     ("GOOGLE_API_KEY", ["claude-mcp-gemini", "banto-gemini"]),
     # GitHub
-    ("GITHUB_TOKEN", ["claude-mcp-github", "banto-github", "gh:github.com"]),
+    ("GITHUB_TOKEN", ["claude-mcp-github", "banto-github"]),
     ("GITHUB_ACCESS_TOKEN", ["claude-mcp-github", "banto-github"]),
     # Cloudflare
     ("CLOUDFLARE_API_TOKEN", ["cloudflare-api-token", "banto-cloudflare"]),
@@ -66,13 +65,21 @@ def _keychain_exists(service: str) -> bool:
     return r.returncode == 0
 
 
+def _is_excluded(service: str) -> bool:
+    """Check if a Keychain service should be excluded (OAuth tokens, etc.)."""
+    if service in EXCLUDED_SERVICES:
+        return True
+    lower = service.lower()
+    return any(pat in lower for pat in EXCLUDED_PATTERNS)
+
+
 def _find_keychain_match(env_var: str) -> str | None:
     """Find a Keychain service name that matches an env var name."""
     # Check known mappings
     for known_env, candidates in ENV_TO_KEYCHAIN:
         if env_var == known_env:
             for svc in candidates:
-                if _keychain_exists(svc):
+                if not _is_excluded(svc) and _keychain_exists(svc):
                     return svc
             return None
 
@@ -80,7 +87,7 @@ def _find_keychain_match(env_var: str) -> str | None:
     name = env_var.lower().replace("_", "-")
     for prefix in ["claude-mcp-", "banto-", ""]:
         candidate = f"{prefix}{name}" if prefix else name
-        if _keychain_exists(candidate):
+        if not _is_excluded(candidate) and _keychain_exists(candidate):
             return candidate
 
     return None
@@ -89,19 +96,16 @@ def _find_keychain_match(env_var: str) -> str | None:
 # ── Platform env var discovery ───────────────────────────────────
 
 def _list_vercel_env_vars(project: str) -> list[str]:
-    """List env var names from a Vercel project."""
+    """List env var names from a Vercel project.
+
+    Always passes --project to scope the query to the requested project.
+    """
     try:
         r = subprocess.run(
-            ["vercel", "env", "ls", "production", "--yes"],
+            ["vercel", "env", "ls", "production", "--project", project, "--yes"],
             capture_output=True, text=True, timeout=15,
             cwd=str(Path.home()),  # avoid link requirement
         )
-        if r.returncode != 0:
-            # Try with project flag
-            r = subprocess.run(
-                ["vercel", "env", "ls", "production"],
-                capture_output=True, text=True, timeout=15,
-            )
         # Parse output: env var names are listed one per line
         env_vars = []
         for line in r.stdout.splitlines():
@@ -149,7 +153,7 @@ PLATFORM_SCANNERS = {
 class SetupMatch:
     env_var: str
     keychain_service: str | None  # None = no match found
-    status: str  # "matched", "missing", "already_configured"
+    status: str  # "matched", "missing", "already_configured", "discovery_empty"
 
 
 def run_setup(
@@ -158,10 +162,15 @@ def run_setup(
     config: SyncConfig | None = None,
     config_path: Path | None = None,
     dry_run: bool = False,
+    guess: bool = False,
 ) -> list[SetupMatch]:
     """Auto-detect env vars on a platform and match to Keychain entries.
 
     Returns list of matches. If not dry_run, also registers in sync.json.
+
+    When discovery returns no results:
+      - Without guess=True: returns a single "discovery_empty" entry (fail-closed).
+      - With guess=True: falls back to known env var catalog (best-effort).
     """
     cfg = config or SyncConfig.load(config_path or DEFAULT_CONFIG_PATH)
     cfg_path = config_path or DEFAULT_CONFIG_PATH
@@ -169,14 +178,21 @@ def run_setup(
     # Discover env vars on the platform
     scanner = PLATFORM_SCANNERS.get(platform)
     if scanner is None:
-        # No scanner — try generic approach
         env_vars: list[str] = []
     else:
         env_vars = scanner(project)
 
     if not env_vars:
-        # If platform scanner returns nothing, use known env vars as candidates
-        env_vars = [e for e, _ in ENV_TO_KEYCHAIN]
+        if guess:
+            # Explicit fallback: use known env var catalog as best-effort candidates
+            env_vars = [e for e, _ in ENV_TO_KEYCHAIN]
+        else:
+            # Fail closed: do not silently guess
+            return [SetupMatch(
+                env_var="(none)",
+                keychain_service=None,
+                status="discovery_empty",
+            )]
 
     matches: list[SetupMatch] = []
     registered = 0
