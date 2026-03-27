@@ -319,8 +319,11 @@ async def banto_validate_keychain() -> dict:
     import re
     import subprocess
 
+    from .keychain import _ctypes_get
     from .sync.validate import SERVICE_PATTERNS, should_exclude, validate_key
 
+    # Step 1: list service names via `security dump-keychain` (metadata only,
+    # no secret values are output by this command).
     result = subprocess.run(
         ["security", "dump-keychain"], capture_output=True, text=True,
     )
@@ -353,6 +356,8 @@ async def banto_validate_keychain() -> dict:
         entries_found.append((current_attrs.get("svce", ""),
                              current_attrs.get("acct", "")))
 
+    # Step 2: for matched providers, retrieve values via ctypes Security
+    # framework (never via `security -w` CLI, which exposes values in argv).
     seen: set[str] = set()
     results = []
     pass_count = 0
@@ -366,28 +371,20 @@ async def banto_validate_keychain() -> dict:
         for pattern in SERVICE_PATTERNS:
             if pattern in svc_lower:
                 seen.add(svc)
-                try:
-                    val = subprocess.run(
-                        ["security", "find-generic-password", "-s", svc, "-w"],
-                        capture_output=True, text=True,
-                    ).stdout.strip()
-                    if val:
-                        vr = validate_key(svc, val)
-                        results.append({"name": svc, "provider": vr.provider,
-                                        "status": vr.status, "message": vr.message})
-                        if vr.status == "pass":
-                            pass_count += 1
-                        elif vr.status == "fail":
-                            fail_count += 1
-                        else:
-                            unknown_count += 1
+                val = _ctypes_get(svc, acct) if acct else None
+                if val:
+                    vr = validate_key(svc, val)
+                    results.append({"name": svc, "provider": vr.provider,
+                                    "status": vr.status, "message": vr.message})
+                    if vr.status == "pass":
+                        pass_count += 1
+                    elif vr.status == "fail":
+                        fail_count += 1
                     else:
-                        results.append({"name": svc, "provider": pattern,
-                                        "status": "unknown", "message": "Could not retrieve"})
                         unknown_count += 1
-                except Exception:
+                else:
                     results.append({"name": svc, "provider": pattern,
-                                    "status": "unknown", "message": "Retrieval error"})
+                                    "status": "unknown", "message": "Could not retrieve"})
                     unknown_count += 1
                 break
 
@@ -658,7 +655,11 @@ def main() -> None:
             transport = args[i + 1]
             i += 2
         elif args[i] == "--port" and i + 1 < len(args):
-            port = int(args[i + 1])
+            try:
+                port = int(args[i + 1])
+            except ValueError:
+                print(f"Invalid port: {args[i + 1]}", file=sys.stderr)
+                sys.exit(1)
             i += 2
         else:
             i += 1
@@ -671,9 +672,24 @@ def main() -> None:
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport == "sse":
-        mcp.run(transport="sse", sse_path="/sse", port=port)
+        if not path_token:
+            print(
+                "WARNING: SSE transport without BANTO_MCP_PATH_TOKEN. "
+                "Set the env var to require a secret URL path.",
+                file=sys.stderr,
+            )
+        mcp.run(transport="sse", sse_path="/sse", host="127.0.0.1", port=port)
     elif transport == "http":
-        mcp.run(transport="streamable-http", path=mcp_path, port=port)
+        if not path_token:
+            print(
+                "WARNING: HTTP transport without BANTO_MCP_PATH_TOKEN. "
+                "Set the env var to require a secret URL path.",
+                file=sys.stderr,
+            )
+        mcp.run(
+            transport="streamable-http", path=mcp_path,
+            host="127.0.0.1", port=port,
+        )
         if path_token:
             print(f"MCP endpoint: http://127.0.0.1:{port}{mcp_path}",
                   file=sys.stderr)
