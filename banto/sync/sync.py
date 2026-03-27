@@ -134,13 +134,14 @@ def sync_secret(
     value = kc.get(entry.account)
     if value is None:
         # Fallback: try raw service name (for --account references like "claude-mcp-openai")
-        import subprocess as _sp
-        _raw = _sp.run(
-            ["security", "find-generic-password", "-s", entry.account, "-w"],
-            capture_output=True, text=True,
-        )
-        if _raw.returncode == 0 and _raw.stdout.strip():
-            value = _raw.stdout.strip()
+        # Use ctypes to avoid exposing values in process arguments.
+        from ..keychain import _ctypes_get
+        import os
+        try:
+            acct = os.getlogin()
+        except OSError:
+            acct = os.environ.get("USER", "unknown")
+        value = _ctypes_get(entry.account, acct)
     if value is None:
         report.results.append(SyncResult(
             secret_name=secret_name,

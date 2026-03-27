@@ -226,13 +226,15 @@ def cmd_sync_add(args: list[str]) -> None:
         # Verify the entry exists
         existing = kc.get(account)
         if existing is None:
-            # Try without prefix (raw Keychain service name)
-            import subprocess as sp
-            raw_check = sp.run(
-                ["security", "find-generic-password", "-s", account, "-w"],
-                capture_output=True, text=True,
-            )
-            if raw_check.returncode != 0:
+            # Try without prefix (raw Keychain service name).
+            # Use ctypes to avoid exposing values in process arguments.
+            from ..keychain import _ctypes_get
+            import os
+            try:
+                _acct = os.getlogin()
+            except OSError:
+                _acct = os.environ.get("USER", "unknown")
+            if _ctypes_get(account, _acct) is None:
                 print(f"Error: Keychain entry '{account}' not found.")
                 sys.exit(1)
         value = None  # Don't need the value for config registration
