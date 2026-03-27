@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ..keychain import KeychainStore
+from ..keychain import KeychainStore, _ctypes_get
 from .config import DEFAULT_CONFIG_PATH, SecretEntry, SyncConfig, Target
 from .drivers import DRIVER_MAP
 from .history import HistoryStore
@@ -1721,10 +1721,7 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             for pattern in SERVICE_PATTERNS:
                 if pattern in svc_lower:
                     seen.add(svc)
-                    val = subprocess.run(
-                        ["security", "find-generic-password", "-s", svc, "-w"],
-                        capture_output=True, text=True,
-                    ).stdout.strip()
+                    val = _ctypes_get(svc, acct) if acct else None
                     if val:
                         vr = validate_key(svc, val)
                         results.append({
