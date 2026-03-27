@@ -231,12 +231,16 @@ class LeaseManager:
             env = {**os.environ, "BANTO_LEASE_VALUE": value}
             try:
                 argv = shlex.split(expanded)
-                subprocess.run(
+                proc = subprocess.run(
                     argv, capture_output=True, text=True, timeout=30,
                     env=env,
                 )
-            except (subprocess.SubprocessError, OSError, ValueError):
-                pass  # Best-effort revocation
+                if proc.returncode != 0:
+                    meta["revoke_error"] = (
+                        f"exit {proc.returncode}"
+                    )
+            except (subprocess.SubprocessError, OSError, ValueError) as exc:
+                meta["revoke_error"] = type(exc).__name__
 
         # Remove from Keychain
         self._kc.delete(lease_id)

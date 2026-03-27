@@ -540,7 +540,11 @@ class _RegisterHandler(BaseHTTPRequestHandler):
             self._json_response(403, {"ok": False, "error": "Forbidden: invalid or missing CSRF token"})
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._json_response(400, {"ok": False, "error": "Invalid Content-Length"})
+            return
         if length > 65536:
             self._json_response(400, {"ok": False, "error": "Payload too large"})
             return
