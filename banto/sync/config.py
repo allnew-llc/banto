@@ -27,13 +27,16 @@ class Target:
     platform: str  # "cloudflare-pages", "vercel", "local"
     project: str = ""  # project name (cloudflare/vercel) or file path (local)
     file: str = ""  # only for platform=local
+    environments: list[str] | None = None  # e.g. ["production", "preview", "development"]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Target:
+        envs = data.get("environments")
         return cls(
             platform=data.get("platform", ""),
             project=data.get("project", ""),
             file=data.get("file", ""),
+            environments=envs if isinstance(envs, list) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,6 +47,8 @@ class Target:
         else:
             if self.project:
                 d["project"] = self.project
+        if self.environments:
+            d["environments"] = self.environments
         return d
 
     @property

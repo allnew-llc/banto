@@ -65,18 +65,28 @@ class VercelDriver(PlatformDriver):
 
         return self._with_linked_dir(project, _check)
 
-    def put(self, env_name: str, value: str, project: str) -> bool:
+    def put(self, env_name: str, value: str, project: str,
+            environments: list[str] | None = None) -> bool:
+        envs = environments or ["production"]
+
         def _do_put(vercel_bin, cwd, linked):
             if not linked:
                 return False
-            result = subprocess.run(
-                [vercel_bin, "env", "add", env_name, "production",
-                 "--force", "--cwd", cwd],
-                input=value,
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0
+            all_ok = True
+            for env in envs:
+                args = [vercel_bin, "env", "add", env_name, env,
+                        "--sensitive", "--force", "--yes", "--cwd", cwd]
+                if env == "preview":
+                    args.insert(args.index(env) + 1, "")
+                result = subprocess.run(
+                    args,
+                    input=value,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    all_ok = False
+            return all_ok
 
         return self._with_linked_dir(project, _do_put)
 
