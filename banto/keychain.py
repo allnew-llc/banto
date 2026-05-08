@@ -13,6 +13,7 @@ Delete/exists use the `security` CLI since they don't handle values.
 
 import ctypes
 import ctypes.util
+import getpass
 import os
 import re
 import subprocess
@@ -55,6 +56,22 @@ def _validate_prefix(prefix: str) -> str:
             "Use only letters, digits, dots, hyphens, and underscores."
         )
     return prefix
+
+
+def default_keychain_account() -> str:
+    """Resolve the macOS Keychain account for non-interactive agent shells."""
+    for candidate in (
+        os.environ.get("USER"),
+        os.environ.get("LOGNAME"),
+        getpass.getuser(),
+    ):
+        if candidate and candidate.strip() and candidate != "root":
+            return candidate.strip()
+    try:
+        login = os.getlogin()
+    except OSError:
+        login = ""
+    return login.strip() or "unknown"
 
 
 # --- macOS Security framework via ctypes ---
@@ -152,10 +169,7 @@ class KeychainStore:
 
     def __init__(self, *, service_prefix: str | None = None):
         self.prefix = _validate_prefix(service_prefix) if service_prefix else self.DEFAULT_PREFIX
-        try:
-            self.account = os.getlogin()
-        except OSError:
-            self.account = os.environ.get("USER", "unknown")
+        self.account = default_keychain_account()
         self.keychain_path = os.path.expanduser(
             "~/Library/Keychains/login.keychain-db"
         )

@@ -145,12 +145,8 @@ def sync_secret(
     if value is None:
         # Fallback: try raw service name (for --account references like "claude-mcp-openai")
         # Use ctypes to avoid exposing values in process arguments.
-        from ..keychain import _ctypes_get
-        import os
-        try:
-            acct = os.getlogin()
-        except OSError:
-            acct = os.environ.get("USER", "unknown")
+        from ..keychain import _ctypes_get, default_keychain_account
+        acct = default_keychain_account()
         value = _ctypes_get(entry.account, acct)
     if value is None:
         report.results.append(SyncResult(
