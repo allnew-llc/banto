@@ -106,11 +106,33 @@ class TestValidateModule:
         assert result.valid is True
 
     @patch("banto.sync.validate._http_get")
+    def test_gemini_uses_header_auth(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.return_value = (200, '{}')
+        result = validate_key("gemini", "gem-test")
+        assert result.valid is True
+        mock_get.assert_called_once_with(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            {"x-goog-api-key": "gem-test"},
+        )
+
+    @patch("banto.sync.validate._http_get")
     def test_cloudflare_valid(self, mock_get):
         from banto.sync.validate import validate_key
         mock_get.return_value = (200, '{"success": true}')
         result = validate_key("cloudflare", "cf-token")
         assert result.valid is True
+
+    @patch("banto.sync.validate._http_get")
+    def test_xai_valid(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.return_value = (200, '{"data": []}')
+        result = validate_key("xai", "xai-test")
+        assert result.valid is True
+        mock_get.assert_called_once_with(
+            "https://api.x.ai/v1/models",
+            {"Authorization": "Bearer xai-test"},
+        )
 
     @patch("banto.sync.validate._http_get")
     def test_pattern_match(self, mock_get):

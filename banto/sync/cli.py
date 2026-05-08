@@ -16,8 +16,43 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..keychain import KeychainStore
+from .capabilities import (
+    ROTATION_CLASS_ORDER,
+    classify_config,
+    summarize_classifications,
+)
 from .config import SyncConfig, SecretEntry, Target, DEFAULT_CONFIG_PATH
 from .history import HistoryStore
+from .google_rotator import (
+    DEFAULT_ACCESS_TOKEN_ENV,
+    DEFAULT_ADC_COMMAND,
+    DEFAULT_GCLOUD_AUTH_COMMAND,
+    GoogleRotatorError,
+    build_google_api_key_plan,
+    rotate_google_api_key,
+)
+from .openai_rotator import (
+    DEFAULT_ADMIN_ACCOUNT,
+    DEFAULT_ADMIN_KEY_ENV,
+    OpenAIRotatorError,
+    build_openai_service_account_plan,
+    delete_project_service_account,
+    list_project_service_accounts,
+    resolve_openai_admin_key,
+    rotate_openai_service_account,
+)
+from .xai_rotator import (
+    DEFAULT_MANAGEMENT_ACCOUNT as DEFAULT_XAI_MANAGEMENT_ACCOUNT,
+    DEFAULT_MANAGEMENT_KEY_ENV as DEFAULT_XAI_MANAGEMENT_KEY_ENV,
+    DEFAULT_XAI_ACLS,
+    XAIRotatorError,
+    build_xai_api_key_plan,
+    rotate_xai_api_key,
+)
+from .incident_report import INCIDENT_LANE_ORDER, LANE_LABELS, build_incident_report
+from .propagation import build_propagation_plan, propagate_secret, validate_propagation_plan
+from .smoke_presets import list_smoke_presets, smoke_preset_exists
+from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
 
 
 def _is_json(args: list[str]) -> bool:
@@ -26,7 +61,6 @@ def _is_json(args: list[str]) -> bool:
 
 def _json_out(data: dict | list) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
-from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
 
 
 def _print_report(report: SyncReport) -> None:
@@ -118,6 +152,120 @@ def cmd_sync_status(args: list[str]) -> None:
         print("  Run: banto sync push")
     else:
         print("\n  All secrets in sync.")
+
+
+def cmd_sync_classify(args: list[str]) -> None:
+    """Classify sync-managed secrets by rotation capability."""
+    config, _ = _load_config(args)
+    classifications = classify_config(config)
+    summary = summarize_classifications(classifications)
+
+    if _is_json(args):
+        _json_out({
+            "count": len(classifications),
+            "summary": summary,
+            "secrets": [
+                {
+                    "name": item.secret_name,
+                    "env_name": item.env_name,
+                    "provider": item.provider,
+                    "rotation_class": item.rotation_class,
+                    "implementation_phase": item.implementation_phase,
+                    "matched_rule": item.matched_rule,
+                    "notes": item.notes,
+                }
+                for item in classifications
+            ],
+        })
+        return
+
+    if not classifications:
+        print("BANTO SYNC CLASSIFY — No secrets configured.")
+        return
+
+    print(f"\nBANTO SYNC CLASSIFY — {len(classifications)} secret(s)\n")
+    print("  Rotation class counts:\n")
+    for rotation_class in ROTATION_CLASS_ORDER:
+        print(f"  {rotation_class:<15} {summary.get(rotation_class, 0):>3}")
+
+    print("\n  Details:\n")
+    env_w = max(20, *(len(item.env_name) for item in classifications))
+    provider_w = max(12, *(len(item.provider) for item in classifications))
+    phase_w = max(8, *(len(item.implementation_phase) for item in classifications))
+
+    for rotation_class in ROTATION_CLASS_ORDER:
+        group = [item for item in classifications if item.rotation_class == rotation_class]
+        if not group:
+            continue
+        print(f"  [{rotation_class}]")
+        for item in group:
+            print(
+                f"    {item.env_name:<{env_w}}  "
+                f"{item.provider:<{provider_w}}  "
+                f"{item.implementation_phase:<{phase_w}}  "
+                f"{item.notes}"
+            )
+        print()
+
+
+def cmd_sync_incident_report(args: list[str]) -> None:
+    """Build an incident-oriented rotation report from sync-managed secrets."""
+    config, _ = _load_config(args)
+    report = build_incident_report(config)
+    counts = report.counts_by_lane()
+
+    if _is_json(args):
+        _json_out({
+            "count": len(report.plans),
+            "counts_by_lane": counts,
+            "plans": [
+                {
+                    "secret_name": plan.secret_name,
+                    "env_name": plan.env_name,
+                    "provider": plan.provider,
+                    "rotation_class": plan.rotation_class,
+                    "implementation_phase": plan.implementation_phase,
+                    "incident_lane": plan.incident_lane,
+                    "incident_priority": plan.incident_priority,
+                    "operator_action": plan.operator_action,
+                    "notes": plan.notes,
+                    "recommended_command": plan.recommended_command,
+                    "requires_human_value": plan.requires_human_value,
+                    "targets": list(plan.targets),
+                    "shared_account_secret_names": list(plan.shared_account_secret_names),
+                }
+                for plan in report.plans
+            ],
+        })
+        return
+
+    if not report.plans:
+        print("BANTO SYNC INCIDENT REPORT — No secrets configured.")
+        return
+
+    print(f"\nBANTO SYNC INCIDENT REPORT — {len(report.plans)} secret(s)\n")
+    print("  Lane counts:\n")
+    for lane in INCIDENT_LANE_ORDER:
+        print(f"  {LANE_LABELS[lane]:<16} {counts.get(lane, 0):>3}")
+
+    for lane in INCIDENT_LANE_ORDER:
+        plans = report.by_lane(lane)
+        if not plans:
+            continue
+        print(f"\n  [{LANE_LABELS[lane]}]")
+        for plan in plans:
+            print(
+                f"    {plan.env_name} ({plan.secret_name})  "
+                f"class={plan.rotation_class}  provider={plan.provider}"
+            )
+            print(f"    action:  {plan.operator_action}")
+            print(f"    command: {plan.recommended_command}")
+            if plan.targets:
+                print(f"    targets: {', '.join(plan.targets)}")
+            if plan.shared_account_secret_names:
+                print(f"    shared:  {', '.join(plan.shared_account_secret_names)}")
+            if plan.notes:
+                print(f"    notes:   {plan.notes}")
 
 
 def cmd_sync_push(args: list[str]) -> None:
@@ -540,6 +688,88 @@ def _resolve_new_value(args: list[str], name: str) -> str | None:
         return None
 
 
+def _parse_smoke_command(args: list[str]) -> str | None:
+    for i, a in enumerate(args):
+        if a == "--smoke" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _parse_smoke_preset(args: list[str]) -> str | None:
+    for i, a in enumerate(args):
+        if a == "--smoke-preset" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _parse_smoke_options(args: list[str]) -> tuple[str | None, str | None]:
+    smoke_command = _parse_smoke_command(args)
+    smoke_preset = _parse_smoke_preset(args)
+    if smoke_command and smoke_preset:
+        print("Error: Specify either --smoke or --smoke-preset, not both.")
+        sys.exit(1)
+    if smoke_preset and not smoke_preset_exists(smoke_preset):
+        available = ", ".join(preset.name for preset in list_smoke_presets())
+        print(f"Error: Unknown smoke preset '{smoke_preset}'. Available: {available}")
+        sys.exit(1)
+    return smoke_command, smoke_preset
+
+
+def _format_smoke_label(smoke_command: str | None, smoke_preset: str | None) -> str | None:
+    if smoke_preset:
+        return f"preset:{smoke_preset}"
+    return smoke_command
+
+
+def _parse_positive_int(value: str, label: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        print(f"Error: {label} must be an integer.")
+        sys.exit(1)
+    if parsed <= 0:
+        print(f"Error: {label} must be greater than zero.")
+        sys.exit(1)
+    return parsed
+
+
+def _propagation_json_payload(result) -> dict:
+    return {
+        "ok": result.ok,
+        "name": result.plan.secret_name,
+        "env_name": result.plan.env_name,
+        "provider": result.plan.provider,
+        "rotation_class": result.plan.rotation_class,
+        "implementation_phase": result.plan.implementation_phase,
+        "version": result.version,
+        "validation": None if result.validation is None else {
+            "provider": result.validation.provider,
+            "status": result.validation.status,
+            "message": result.validation.message,
+        },
+        "smoke_check": None if result.smoke_check is None else {
+            "type": "preset" if result.smoke_check.command.startswith("preset:") else "command",
+            "success": result.smoke_check.success,
+            "exit_code": result.smoke_check.exit_code,
+            "command": result.smoke_check.command,
+            "message": result.smoke_check.message,
+        },
+        "sync": None if result.sync_report is None else {
+            "ok": result.sync_report.all_ok,
+            "ok_count": result.sync_report.ok_count,
+            "fail_count": result.sync_report.fail_count,
+            "results": [
+                {
+                    "target": item.target_label,
+                    "success": item.success,
+                    "message": item.message,
+                }
+                for item in result.sync_report.results
+            ],
+        },
+    }
+
+
 def cmd_sync_rotate(args: list[str]) -> None:
     """Rotate a secret — update Keychain + re-sync all targets."""
     config, config_path = _load_config(args)
@@ -585,6 +815,1072 @@ def cmd_sync_rotate(args: list[str]) -> None:
         _print_report(report)
         if not report.all_ok:
             sys.exit(1)
+
+
+def cmd_sync_propagate(args: list[str]) -> None:
+    """Common propagation flow for propagate_only/full_auto/partial_auto secrets."""
+    config, _ = _load_config(args)
+
+    name = None
+    for a in args:
+        if not a.startswith("--"):
+            name = a
+            break
+
+    if not name:
+        print(
+            "Usage: banto sync propagate <name> [--from-cli '<command>'] "
+            "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    try:
+        plan = build_propagation_plan(config, name)
+    except KeyError:
+        print(f"Error: Secret '{name}' not found.")
+        sys.exit(1)
+
+    try:
+        validate_propagation_plan(plan)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    do_validate = "--validate" in args
+    dry_run = "--dry-run" in args
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    if dry_run:
+        payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.secret_name,
+            "env_name": plan.env_name,
+            "provider": plan.provider,
+            "rotation_class": plan.rotation_class,
+            "implementation_phase": plan.implementation_phase,
+            "matched_rule": plan.matched_rule,
+            "targets": list(plan.targets),
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "notes": plan.notes,
+        }
+        if _is_json(args):
+            _json_out(payload)
+            return
+
+        print(f"\nBANTO SYNC PROPAGATE — Dry run for {plan.secret_name}\n")
+        print(f"  env_name:      {plan.env_name}")
+        print(f"  provider:      {plan.provider}")
+        print(f"  class:         {plan.rotation_class}")
+        print(f"  phase:         {plan.implementation_phase}")
+        print(f"  matched_rule:  {plan.matched_rule or '(none)'}")
+        print(f"  validate:      {'yes' if do_validate else 'no'}")
+        print(f"  smoke:         {smoke_label or '(none)'}")
+        print(f"  targets:       {len(plan.targets)}")
+        for label in plan.targets:
+            print(f"    - {label}")
+        if plan.notes:
+            print(f"\n  notes: {plan.notes}")
+        return
+
+    value = _resolve_new_value(args, name)
+    if value is None:
+        sys.exit(1)
+
+    result = propagate_secret(
+        config,
+        name,
+        value,
+        do_validate=do_validate,
+        smoke_command=smoke_command,
+        smoke_preset=smoke_preset,
+    )
+
+    if _is_json(args):
+        _json_out(_propagation_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.validation is not None:
+        if result.validation.status == "pass":
+            print(f"Validation passed: {result.validation.message}")
+        elif result.validation.status == "unknown":
+            print(f"Validation unknown: {result.validation.message}")
+        else:
+            print(f"Validation failed: {result.validation.message}")
+
+    if result.version is not None:
+        print(f"Propagated '{result.plan.secret_name}' (now v{result.version})")
+
+    if result.sync_report is not None:
+        print("Syncing to all targets...")
+        _print_report(result.sync_report)
+
+    if result.smoke_check is not None:
+        if result.smoke_check.success:
+            print(f"Smoke test passed: {result.smoke_check.command}")
+        else:
+            print(f"Smoke test failed: {result.smoke_check.message}")
+
+    if not result.ok:
+        sys.exit(1)
+
+
+def cmd_sync_openai_service_account(args: list[str]) -> None:
+    """Rotate an OpenAI secret via project service-account issuance."""
+    config, _ = _load_config(args)
+
+    name = None
+    project_id = None
+    service_account_name = None
+    admin_key_env = DEFAULT_ADMIN_KEY_ENV
+    admin_account = DEFAULT_ADMIN_ACCOUNT
+    revoke_service_account_id = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--project-id" and i + 1 < len(args):
+            project_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--service-account-name" and i + 1 < len(args):
+            service_account_name = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-key-env" and i + 1 < len(args):
+            admin_key_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-account" and i + 1 < len(args):
+            admin_account = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-service-account" and i + 1 < len(args):
+            revoke_service_account_id = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not project_id:
+        print(
+            "Usage: banto sync openai-service-account <name> --project-id <proj_...> "
+            "[--service-account-name <name>] [--admin-key-env OPENAI_ADMIN_KEY] "
+            "[--admin-account openai-admin] [--revoke-service-account <svc_...>] "
+            "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    do_validate = "--validate" in args
+    dry_run = "--dry-run" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        plan = build_openai_service_account_plan(
+            config,
+            name,
+            project_id,
+            service_account_name=service_account_name,
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.propagation_plan.secret_name,
+            "env_name": plan.propagation_plan.env_name,
+            "provider": plan.propagation_plan.provider,
+            "rotation_class": plan.propagation_plan.rotation_class,
+            "implementation_phase": plan.propagation_plan.implementation_phase,
+            "project_id": plan.project_id,
+            "service_account_name": plan.service_account_name,
+            "admin_resolution_order": [
+                f"env:{admin_key_env}",
+                f"keychain:{config.keychain_service}:{admin_account}",
+            ],
+            "revoke_service_account_id": revoke_service_account_id,
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+        }
+        if _is_json(args):
+            _json_out(payload)
+            return
+
+        print(f"\nBANTO SYNC OPENAI SERVICE ACCOUNT — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:              {plan.propagation_plan.env_name}")
+        print(f"  project_id:            {plan.project_id}")
+        print(f"  service_account_name:  {plan.service_account_name}")
+        print(f"  validate:              {'yes' if do_validate else 'no'}")
+        print(f"  smoke:                 {smoke_label or '(none)'}")
+        print(f"  revoke_previous:       {revoke_service_account_id or '(none)'}")
+        print("  admin_resolution:")
+        print(f"    - env:{admin_key_env}")
+        print(f"    - keychain:{config.keychain_service}:{admin_account}")
+        print(f"  targets:               {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        return
+
+    try:
+        result = rotate_openai_service_account(
+            config,
+            name,
+            project_id,
+            service_account_name=service_account_name,
+            admin_key_env=admin_key_env,
+            admin_account=admin_account,
+            revoke_service_account_id=revoke_service_account_id,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+        )
+    except OpenAIRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out({
+            "ok": result.ok,
+            "name": result.plan.propagation_plan.secret_name,
+            "env_name": result.plan.propagation_plan.env_name,
+            "project_id": result.plan.project_id,
+            "service_account_name": result.plan.service_account_name,
+            "admin_key_source": result.admin_key_source,
+            "created": None if result.created is None else {
+                "service_account_id": result.created.service_account_id,
+                "service_account_name": result.created.service_account_name,
+                "api_key_id": result.created.api_key_id,
+                "created_at": result.created.created_at,
+            },
+            "propagation": None if result.propagation is None else _propagation_json_payload(result.propagation),
+            "rollback": None if result.rollback is None else {
+                "attempted": result.rollback.attempted,
+                "restored_previous_value": result.rollback.restored_previous_value,
+                "version": result.rollback.version,
+                "sync_ok": result.rollback.sync_ok,
+                "message": result.rollback.message,
+            },
+            "cleanup_of_created_service_account": None
+            if result.cleanup_of_created_service_account is None else {
+                "service_account_id": result.cleanup_of_created_service_account.service_account_id,
+                "deleted": result.cleanup_of_created_service_account.deleted,
+                "message": result.cleanup_of_created_service_account.message,
+            },
+            "revoked_previous_service_account": None
+            if result.revoked_previous_service_account is None else {
+                "service_account_id": result.revoked_previous_service_account.service_account_id,
+                "deleted": result.revoked_previous_service_account.deleted,
+                "message": result.revoked_previous_service_account.message,
+            },
+            "error": result.error,
+        })
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.created is not None:
+        print(
+            "Created OpenAI service account "
+            f"{result.created.service_account_id} ({result.created.service_account_name})"
+        )
+
+    if result.propagation is not None:
+        if result.propagation.validation is not None:
+            if result.propagation.validation.status == "pass":
+                print(f"Validation passed: {result.propagation.validation.message}")
+            elif result.propagation.validation.status == "unknown":
+                print(f"Validation unknown: {result.propagation.validation.message}")
+            else:
+                print(f"Validation failed: {result.propagation.validation.message}")
+
+        if result.propagation.version is not None:
+            print(
+                f"Propagated '{result.propagation.plan.secret_name}' "
+                f"(now v{result.propagation.version})"
+            )
+        if result.propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.propagation.sync_report)
+        if result.propagation.smoke_check is not None:
+            if result.propagation.smoke_check.success:
+                print(f"Smoke test passed: {result.propagation.smoke_check.command}")
+            else:
+                print(f"Smoke test failed: {result.propagation.smoke_check.message}")
+
+    if result.rollback is not None:
+        if result.rollback.restored_previous_value:
+            print(f"Rollback succeeded: {result.rollback.message}")
+        else:
+            print(f"Rollback failed: {result.rollback.message}")
+
+    if result.cleanup_of_created_service_account is not None:
+        cleanup = result.cleanup_of_created_service_account
+        if cleanup.deleted:
+            print(f"Cleaned up created service account: {cleanup.service_account_id}")
+        else:
+            print(f"Cleanup failed: {cleanup.message}")
+
+    if result.revoked_previous_service_account is not None:
+        revoked = result.revoked_previous_service_account
+        if revoked.deleted:
+            print(f"Revoked previous service account: {revoked.service_account_id}")
+        else:
+            print(f"Previous service account revoke failed: {revoked.message}")
+
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_openai_service_accounts(args: list[str]) -> None:
+    """List OpenAI project service accounts without exposing key values."""
+    config, _ = _load_config(args)
+
+    project_id = None
+    admin_key_env = DEFAULT_ADMIN_KEY_ENV
+    admin_account = DEFAULT_ADMIN_ACCOUNT
+    limit = 20
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--project-id" and i + 1 < len(args):
+            project_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-key-env" and i + 1 < len(args):
+            admin_key_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-account" and i + 1 < len(args):
+            admin_account = args[i + 1]
+            i += 2
+            continue
+        if arg == "--limit" and i + 1 < len(args):
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                print(f"Error: invalid --limit value: {args[i + 1]}")
+                sys.exit(1)
+            i += 2
+            continue
+        i += 1
+
+    if not project_id:
+        print(
+            "Usage: banto sync openai-service-accounts --project-id <proj_...> "
+            "[--limit N] [--admin-key-env OPENAI_ADMIN_KEY] "
+            "[--admin-account openai-admin] [--json]"
+        )
+        sys.exit(1)
+
+    try:
+        admin_key, admin_key_source = resolve_openai_admin_key(
+            config,
+            env_var=admin_key_env,
+            account=admin_account,
+        )
+        accounts = list_project_service_accounts(
+            project_id,
+            admin_key=admin_key,
+            limit=limit,
+        )
+    except OpenAIRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    accounts = sorted(
+        accounts,
+        key=lambda item: item.created_at or 0,
+        reverse=True,
+    )
+
+    if _is_json(args):
+        _json_out({
+            "ok": True,
+            "project_id": project_id,
+            "admin_key_source": admin_key_source,
+            "count": len(accounts),
+            "service_accounts": [
+                {
+                    "service_account_id": item.service_account_id,
+                    "service_account_name": item.service_account_name,
+                    "role": item.role,
+                    "created_at": item.created_at,
+                }
+                for item in accounts
+            ],
+        })
+        return
+
+    print(f"\nBANTO SYNC OPENAI SERVICE ACCOUNTS — {project_id}\n")
+    print(f"  admin_key_source:  {admin_key_source}")
+    print(f"  count:             {len(accounts)}")
+    for item in accounts:
+        created_at = (
+            datetime.fromtimestamp(item.created_at, tz=timezone.utc).isoformat()
+            if item.created_at is not None else "unknown"
+        )
+        print(
+            f"  - {item.service_account_id}  "
+            f"{item.service_account_name}  "
+            f"role={item.role or 'unknown'}  "
+            f"created_at={created_at}"
+        )
+
+
+def cmd_sync_openai_revoke_service_account(args: list[str]) -> None:
+    """Revoke one OpenAI project service account."""
+    config, _ = _load_config(args)
+
+    project_id = None
+    service_account_id = None
+    admin_key_env = DEFAULT_ADMIN_KEY_ENV
+    admin_account = DEFAULT_ADMIN_ACCOUNT
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--project-id" and i + 1 < len(args):
+            project_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--service-account-id" and i + 1 < len(args):
+            service_account_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-key-env" and i + 1 < len(args):
+            admin_key_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--admin-account" and i + 1 < len(args):
+            admin_account = args[i + 1]
+            i += 2
+            continue
+        i += 1
+
+    if not project_id or not service_account_id:
+        print(
+            "Usage: banto sync openai-revoke-service-account "
+            "--project-id <proj_...> --service-account-id <svc_...> "
+            "[--admin-key-env OPENAI_ADMIN_KEY] [--admin-account openai-admin] "
+            "[--json]"
+        )
+        sys.exit(1)
+
+    try:
+        admin_key, admin_key_source = resolve_openai_admin_key(
+            config,
+            env_var=admin_key_env,
+            account=admin_account,
+        )
+        deleted = delete_project_service_account(
+            project_id,
+            service_account_id,
+            admin_key=admin_key,
+        )
+    except OpenAIRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out({
+            "ok": deleted.deleted,
+            "project_id": project_id,
+            "service_account_id": deleted.service_account_id,
+            "deleted": deleted.deleted,
+            "admin_key_source": admin_key_source,
+        })
+        if not deleted.deleted:
+            sys.exit(1)
+        return
+
+    if deleted.deleted:
+        print(
+            "Revoked OpenAI service account "
+            f"{deleted.service_account_id} from {project_id} "
+            f"(admin_key_source={admin_key_source})"
+        )
+        return
+
+    print(f"Error: Failed to revoke {service_account_id}")
+    sys.exit(1)
+
+
+def cmd_sync_google_api_key(args: list[str]) -> None:
+    """Rotate a Google API key via the Google Cloud API Keys API."""
+    config, _ = _load_config(args)
+
+    name = None
+    project_id = None
+    display_name = None
+    key_id = None
+    quota_project = None
+    access_token_env = DEFAULT_ACCESS_TOKEN_ENV
+    adc_command = DEFAULT_ADC_COMMAND
+    revoke_key_name = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--project-id" and i + 1 < len(args):
+            project_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--display-name" and i + 1 < len(args):
+            display_name = args[i + 1]
+            i += 2
+            continue
+        if arg == "--key-id" and i + 1 < len(args):
+            key_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--quota-project" and i + 1 < len(args):
+            quota_project = args[i + 1]
+            i += 2
+            continue
+        if arg == "--access-token-env" and i + 1 < len(args):
+            access_token_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--adc-command" and i + 1 < len(args):
+            adc_command = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-key" and i + 1 < len(args):
+            revoke_key_name = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not project_id:
+        print(
+            "Usage: banto sync google-api-key <name> --project-id <project> "
+            "[--display-name <name>] [--key-id <key-id>] "
+            "[--quota-project <project>] [--access-token-env GOOGLE_OAUTH_ACCESS_TOKEN] "
+            "[--adc-command 'gcloud auth application-default print-access-token'] "
+            "[--revoke-key <projects/.../locations/global/keys/...>] "
+            "[--sync-shared-account-secrets] [--validate] "
+            "[--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    do_validate = "--validate" in args
+    dry_run = "--dry-run" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    sync_shared_account_secrets = "--sync-shared-account-secrets" in args
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        plan = build_google_api_key_plan(
+            config,
+            name,
+            project_id,
+            display_name=display_name,
+            key_id=key_id,
+            quota_project=quota_project,
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.propagation_plan.secret_name,
+            "env_name": plan.propagation_plan.env_name,
+            "provider": plan.propagation_plan.provider,
+            "rotation_class": plan.propagation_plan.rotation_class,
+            "implementation_phase": plan.propagation_plan.implementation_phase,
+            "project_id": plan.project_id,
+            "parent": plan.parent,
+            "display_name": plan.display_name,
+            "key_id": plan.key_id,
+            "quota_project": plan.quota_project,
+            "access_token_resolution_order": [
+                f"env:{access_token_env}",
+                f"adc:{adc_command}",
+                f"gcloud:{DEFAULT_GCLOUD_AUTH_COMMAND}",
+            ],
+            "revoke_key_name": revoke_key_name,
+            "sync_shared_account_secrets": sync_shared_account_secrets,
+            "shared_account_secret_names": list(plan.shared_account_secret_names),
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+        }
+        if _is_json(args):
+            _json_out(payload)
+            return
+
+        print(f"\nBANTO SYNC GOOGLE API KEY — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:                   {plan.propagation_plan.env_name}")
+        print(f"  project_id:                 {plan.project_id}")
+        print(f"  parent:                     {plan.parent}")
+        print(f"  display_name:               {plan.display_name}")
+        print(f"  key_id:                     {plan.key_id or '(auto)'}")
+        print(f"  quota_project:              {plan.quota_project or '(none)'}")
+        print(f"  validate:                   {'yes' if do_validate else 'no'}")
+        print(f"  smoke:                      {smoke_label or '(none)'}")
+        print(f"  revoke_previous_key:        {revoke_key_name or '(none)'}")
+        print(f"  sync_shared_account_secrets:{'yes' if sync_shared_account_secrets else 'no'}")
+        print("  access_token_resolution:")
+        print(f"    - env:{access_token_env}")
+        print(f"    - adc:{adc_command}")
+        print(f"    - gcloud:{DEFAULT_GCLOUD_AUTH_COMMAND}")
+        print(f"  targets:                    {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        if plan.shared_account_secret_names:
+            print("  shared_account_secret_names:")
+            for sibling in plan.shared_account_secret_names:
+                print(f"    - {sibling}")
+        return
+
+    try:
+        result = rotate_google_api_key(
+            config,
+            name,
+            project_id,
+            display_name=display_name,
+            key_id=key_id,
+            quota_project=quota_project,
+            access_token_env=access_token_env,
+            adc_command=adc_command,
+            revoke_key_name=revoke_key_name,
+            sync_shared_account_secrets=sync_shared_account_secrets,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+        )
+    except GoogleRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out({
+            "ok": result.ok,
+            "name": result.plan.propagation_plan.secret_name,
+            "env_name": result.plan.propagation_plan.env_name,
+            "project_id": result.plan.project_id,
+            "parent": result.plan.parent,
+            "display_name": result.plan.display_name,
+            "key_id": result.plan.key_id,
+            "quota_project": result.plan.quota_project,
+            "shared_account_secret_names": list(result.plan.shared_account_secret_names),
+            "access_token_source": result.access_token_source,
+            "created": None if result.created is None else {
+                "key_name": result.created.key_name,
+                "display_name": result.created.display_name,
+                "key_id": result.created.key_id,
+                "key_uid": result.created.key_uid,
+                "operation_name": result.created.operation_name,
+            },
+            "primary_propagation": None if result.primary_propagation is None else _propagation_json_payload(result.primary_propagation),
+            "sibling_propagations": [
+                {
+                    "secret_name": item.secret_name,
+                    "attempted": item.attempted,
+                    "ok": item.ok,
+                    "skipped": item.skipped,
+                    "reason": item.reason,
+                    "propagation": None if item.propagation is None else _propagation_json_payload(item.propagation),
+                }
+                for item in result.sibling_propagations
+            ],
+            "rollback_entries": [
+                {
+                    "secret_name": item.secret_name,
+                    "restored_previous_value": item.restored_previous_value,
+                    "version": item.version,
+                    "sync_ok": item.sync_ok,
+                    "message": item.message,
+                }
+                for item in result.rollback_entries
+            ],
+            "cleanup_of_created_key": None if result.cleanup_of_created_key is None else {
+                "key_name": result.cleanup_of_created_key.key_name,
+                "deleted": result.cleanup_of_created_key.deleted,
+                "operation_name": result.cleanup_of_created_key.operation_name,
+                "message": result.cleanup_of_created_key.message,
+            },
+            "revoked_previous_key": None if result.revoked_previous_key is None else {
+                "key_name": result.revoked_previous_key.key_name,
+                "deleted": result.revoked_previous_key.deleted,
+                "operation_name": result.revoked_previous_key.operation_name,
+                "message": result.revoked_previous_key.message,
+            },
+            "error": result.error,
+        })
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.created is not None:
+        print(
+            f"Created Google API key {result.created.key_name} "
+            f"({result.created.display_name})"
+        )
+
+    if result.primary_propagation is not None:
+        if result.primary_propagation.validation is not None:
+            if result.primary_propagation.validation.status == "pass":
+                print(f"Validation passed: {result.primary_propagation.validation.message}")
+            elif result.primary_propagation.validation.status == "unknown":
+                print(f"Validation unknown: {result.primary_propagation.validation.message}")
+            else:
+                print(f"Validation failed: {result.primary_propagation.validation.message}")
+        if result.primary_propagation.version is not None:
+            print(
+                f"Propagated '{result.primary_propagation.plan.secret_name}' "
+                f"(now v{result.primary_propagation.version})"
+            )
+        if result.primary_propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.primary_propagation.sync_report)
+        if result.primary_propagation.smoke_check is not None:
+            if result.primary_propagation.smoke_check.success:
+                print(f"Smoke test passed: {result.primary_propagation.smoke_check.command}")
+            else:
+                print(f"Smoke test failed: {result.primary_propagation.smoke_check.message}")
+
+    for sibling in result.sibling_propagations:
+        if sibling.skipped:
+            print(f"Skipped shared-account secret '{sibling.secret_name}': {sibling.reason}")
+        elif sibling.ok:
+            print(f"Synchronized shared-account secret '{sibling.secret_name}'")
+        else:
+            print(f"Shared-account sync failed for '{sibling.secret_name}'")
+
+    for rollback in result.rollback_entries:
+        if rollback.restored_previous_value:
+            print(f"Rollback succeeded for '{rollback.secret_name}': {rollback.message}")
+        else:
+            print(f"Rollback failed for '{rollback.secret_name}': {rollback.message}")
+
+    if result.cleanup_of_created_key is not None:
+        cleanup = result.cleanup_of_created_key
+        if cleanup.deleted:
+            print(f"Cleaned up created Google API key: {cleanup.key_name}")
+        else:
+            print(f"Cleanup failed: {cleanup.message}")
+
+    if result.revoked_previous_key is not None:
+        revoked = result.revoked_previous_key
+        if revoked.deleted:
+            print(f"Revoked previous Google API key: {revoked.key_name}")
+        else:
+            print(f"Previous Google API key revoke failed: {revoked.message}")
+
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_xai_api_key(args: list[str]) -> None:
+    """Rotate an xAI API key via the xAI Management API."""
+    config, _ = _load_config(args)
+
+    name = None
+    team_id = None
+    key_name = None
+    management_key_env = DEFAULT_XAI_MANAGEMENT_KEY_ENV
+    management_account = DEFAULT_XAI_MANAGEMENT_ACCOUNT
+    revoke_api_key_id = None
+    acls: list[str] = []
+    qps = None
+    qpm = None
+    tpm = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--team-id" and i + 1 < len(args):
+            team_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--key-name" and i + 1 < len(args):
+            key_name = args[i + 1]
+            i += 2
+            continue
+        if arg == "--management-key-env" and i + 1 < len(args):
+            management_key_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--management-account" and i + 1 < len(args):
+            management_account = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-api-key" and i + 1 < len(args):
+            revoke_api_key_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--acl" and i + 1 < len(args):
+            acls.append(args[i + 1])
+            i += 2
+            continue
+        if arg == "--qps" and i + 1 < len(args):
+            qps = _parse_positive_int(args[i + 1], "--qps")
+            i += 2
+            continue
+        if arg == "--qpm" and i + 1 < len(args):
+            qpm = _parse_positive_int(args[i + 1], "--qpm")
+            i += 2
+            continue
+        if arg == "--tpm" and i + 1 < len(args):
+            tpm = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not team_id:
+        print(
+            "Usage: banto sync xai-api-key <name> --team-id <team_id> "
+            "[--key-name <name>] [--management-key-env XAI_MANAGEMENT_API_KEY] "
+            "[--management-account xai-management] [--acl <acl> ...] "
+            "[--qps N] [--qpm N] [--tpm N] "
+            "[--wait-propagation] [--revoke-api-key <apiKeyId>] "
+            "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    do_validate = "--validate" in args
+    dry_run = "--dry-run" in args
+    wait_for_propagation = "--wait-propagation" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        plan = build_xai_api_key_plan(
+            config,
+            name,
+            team_id,
+            key_name=key_name,
+            acls=tuple(acls) if acls else DEFAULT_XAI_ACLS,
+            qps=qps,
+            qpm=qpm,
+            tpm=tpm,
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.propagation_plan.secret_name,
+            "env_name": plan.propagation_plan.env_name,
+            "provider": plan.propagation_plan.provider,
+            "rotation_class": plan.propagation_plan.rotation_class,
+            "implementation_phase": plan.propagation_plan.implementation_phase,
+            "team_id": plan.team_id,
+            "key_name": plan.key_name,
+            "acls": list(plan.acls),
+            "qps": plan.qps,
+            "qpm": plan.qpm,
+            "tpm": plan.tpm,
+            "management_key_resolution_order": [
+                f"env:{management_key_env}",
+                f"keychain:{config.keychain_service}:{management_account}",
+            ],
+            "revoke_api_key_id": revoke_api_key_id,
+            "wait_for_propagation": wait_for_propagation,
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+        }
+        if _is_json(args):
+            _json_out(payload)
+            return
+
+        print(f"\nBANTO SYNC XAI API KEY — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:              {plan.propagation_plan.env_name}")
+        print(f"  team_id:               {plan.team_id}")
+        print(f"  key_name:              {plan.key_name}")
+        print(f"  acls:                  {', '.join(plan.acls)}")
+        print(f"  qps:                   {plan.qps or '(none)'}")
+        print(f"  qpm:                   {plan.qpm or '(none)'}")
+        print(f"  tpm:                   {plan.tpm or '(none)'}")
+        print(f"  wait_propagation:      {'yes' if wait_for_propagation else 'no'}")
+        print(f"  validate:              {'yes' if do_validate else 'no'}")
+        print(f"  smoke:                 {smoke_label or '(none)'}")
+        print(f"  revoke_previous_key:   {revoke_api_key_id or '(none)'}")
+        print("  management_resolution:")
+        print(f"    - env:{management_key_env}")
+        print(f"    - keychain:{config.keychain_service}:{management_account}")
+        print(f"  targets:               {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        return
+
+    try:
+        result = rotate_xai_api_key(
+            config,
+            name,
+            team_id,
+            key_name=key_name,
+            acls=tuple(acls) if acls else DEFAULT_XAI_ACLS,
+            qps=qps,
+            qpm=qpm,
+            tpm=tpm,
+            management_key_env=management_key_env,
+            management_account=management_account,
+            revoke_api_key_id=revoke_api_key_id,
+            wait_for_propagation=wait_for_propagation,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+        )
+    except XAIRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out({
+            "ok": result.ok,
+            "name": result.plan.propagation_plan.secret_name,
+            "env_name": result.plan.propagation_plan.env_name,
+            "team_id": result.plan.team_id,
+            "key_name": result.plan.key_name,
+            "acls": list(result.plan.acls),
+            "management_key_source": result.management_key_source,
+            "created": None if result.created is None else {
+                "api_key_id": result.created.api_key_id,
+                "name": result.created.name,
+                "redacted_api_key": result.created.redacted_api_key,
+                "create_time": result.created.create_time,
+            },
+            "propagation_status": None if result.propagation_status is None else {
+                "api_key_id": result.propagation_status.api_key_id,
+                "propagated": result.propagation_status.propagated,
+                "clusters": result.propagation_status.clusters,
+                "message": result.propagation_status.message,
+            },
+            "propagation": None if result.propagation is None else _propagation_json_payload(result.propagation),
+            "rollback": None if result.rollback is None else {
+                "attempted": result.rollback.attempted,
+                "restored_previous_value": result.rollback.restored_previous_value,
+                "version": result.rollback.version,
+                "sync_ok": result.rollback.sync_ok,
+                "message": result.rollback.message,
+            },
+            "cleanup_of_created_key": None if result.cleanup_of_created_key is None else {
+                "api_key_id": result.cleanup_of_created_key.api_key_id,
+                "deleted": result.cleanup_of_created_key.deleted,
+                "message": result.cleanup_of_created_key.message,
+            },
+            "revoked_previous_key": None if result.revoked_previous_key is None else {
+                "api_key_id": result.revoked_previous_key.api_key_id,
+                "deleted": result.revoked_previous_key.deleted,
+                "message": result.revoked_previous_key.message,
+            },
+            "error": result.error,
+        })
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.created is not None:
+        print(f"Created xAI API key {result.created.api_key_id} ({result.created.name})")
+
+    if result.propagation_status is not None:
+        if result.propagation_status.propagated:
+            print("xAI propagation check passed.")
+        else:
+            print(f"xAI propagation check failed: {result.propagation_status.message}")
+
+    if result.propagation is not None:
+        if result.propagation.validation is not None:
+            if result.propagation.validation.status == "pass":
+                print(f"Validation passed: {result.propagation.validation.message}")
+            elif result.propagation.validation.status == "unknown":
+                print(f"Validation unknown: {result.propagation.validation.message}")
+            else:
+                print(f"Validation failed: {result.propagation.validation.message}")
+        if result.propagation.version is not None:
+            print(
+                f"Propagated '{result.propagation.plan.secret_name}' "
+                f"(now v{result.propagation.version})"
+            )
+        if result.propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.propagation.sync_report)
+        if result.propagation.smoke_check is not None:
+            if result.propagation.smoke_check.success:
+                print(f"Smoke test passed: {result.propagation.smoke_check.command}")
+            else:
+                print(f"Smoke test failed: {result.propagation.smoke_check.message}")
+
+    if result.rollback is not None:
+        if result.rollback.restored_previous_value:
+            print(f"Rollback succeeded: {result.rollback.message}")
+        else:
+            print(f"Rollback failed: {result.rollback.message}")
+
+    if result.cleanup_of_created_key is not None:
+        cleanup = result.cleanup_of_created_key
+        if cleanup.deleted:
+            print(f"Cleaned up created xAI API key: {cleanup.api_key_id}")
+        else:
+            print(f"Cleanup failed: {cleanup.message}")
+
+    if result.revoked_previous_key is not None:
+        revoked = result.revoked_previous_key
+        if revoked.deleted:
+            print(f"Revoked previous xAI API key: {revoked.api_key_id}")
+        else:
+            print(f"Previous xAI API key revoke failed: {revoked.message}")
+
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
+        sys.exit(1)
 
 
 def cmd_sync_run(args: list[str]) -> None:
@@ -928,8 +2224,16 @@ def cmd_sync_setup(args: list[str]) -> None:
 
 SYNC_COMMANDS = {
     "status": cmd_sync_status,
+    "classify": cmd_sync_classify,
+    "incident-report": cmd_sync_incident_report,
     "push": cmd_sync_push,
     "add": cmd_sync_add,
+    "google-api-key": cmd_sync_google_api_key,
+    "openai-service-account": cmd_sync_openai_service_account,
+    "openai-service-accounts": cmd_sync_openai_service_accounts,
+    "openai-revoke-service-account": cmd_sync_openai_revoke_service_account,
+    "xai-api-key": cmd_sync_xai_api_key,
+    "propagate": cmd_sync_propagate,
     "rotate": cmd_sync_rotate,
     "audit": cmd_sync_audit,
     "validate": cmd_sync_validate,
@@ -952,9 +2256,17 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  setup <plat:proj>   Auto-detect env vars + match Keychain (one command)")
         print("  init                Create default sync config")
         print("  status              Show sync status matrix")
+        print("  classify            Group secrets by rotation strategy")
+        print("  incident-report     Prioritize secrets for incident response")
         print("  validate            Test API keys against provider endpoints")
         print("  push [--validate]   Sync secrets to targets (--validate first)")
         print("  add <name> ...      Add a new secret")
+        print("  google-api-key <name> --project-id <project>")
+        print("  openai-service-account <name> --project-id <proj_...>")
+        print("  openai-service-accounts --project-id <proj_...>")
+        print("  openai-revoke-service-account --project-id <proj_...> --service-account-id <svc_...>")
+        print("  xai-api-key <name> --team-id <team_id>")
+        print("  propagate <name>    Store + sync replacement value via common flow")
         print("  rotate <name>       Rotate a secret (update + re-sync)")
         print("  audit [--max-age-days N]  Check drift + fingerprint + stale")
         print("  history <name>      Show version history")
@@ -962,6 +2274,9 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  export [--format]   Export secrets (env/json/docker)")
         print("  import <file>       Import from .env or .json file")
         print("  ui [--port N]       Launch local web UI")
+        print("\nSmoke presets:")
+        for preset in list_smoke_presets():
+            print(f"  {preset.name:<18} {preset.description}")
         sys.exit(0)
 
     sub = args[0]

@@ -14,8 +14,15 @@ class PlatformDriver(ABC):
         """Check if the secret exists on the target."""
 
     @abstractmethod
-    def put(self, env_name: str, value: str, project: str) -> bool:
-        """Deploy a secret value to the target. Returns True on success."""
+    def put(self, env_name: str, value: str, project: str,
+            environments: list[str] | None = None) -> bool:
+        """Deploy a secret value to the target. Returns True on success.
+
+        Args:
+            environments: Platform-specific environment list (e.g. Vercel
+                          ["production", "preview", "development"]).
+                          Drivers that don't support this parameter ignore it.
+        """
 
     @abstractmethod
     def delete(self, env_name: str, project: str) -> bool:

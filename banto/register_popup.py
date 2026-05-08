@@ -27,12 +27,14 @@ from .sync.config import SyncConfig
 # Keep in sync with setup.py ENV_TO_KEYCHAIN.
 PROVIDER_PRESETS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
+    "openai-admin": "OPENAI_ADMIN_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "google": "GOOGLE_API_KEY",
     "github": "GITHUB_TOKEN",
     "cloudflare": "CLOUDFLARE_API_TOKEN",
     "xai": "XAI_API_KEY",
+    "xai-management": "XAI_MANAGEMENT_API_KEY",
     "line-channel-token": "LINE_CHANNEL_ACCESS_TOKEN",
     "line-channel-secret": "LINE_CHANNEL_SECRET",
     "line-owner-user-id": "LINE_OWNER_USER_ID",
@@ -45,6 +47,132 @@ PROVIDER_PRESETS: dict[str, str] = {
     "sendgrid": "SENDGRID_API_KEY",
     "database-url": "DATABASE_URL",
 }
+
+PROVIDER_GUIDES: dict[str, dict[str, object]] = {
+    "xai": {
+        "title": "xAI runtime key",
+        "summary": "Use the full-auto rotator when possible. Store a manual key here only when you already created one in xAI.",
+        "issuer_url": "https://console.x.ai/team/default/api-keys",
+        "automation": "banto sync xai-api-key xai --team-id <team_id> --wait-propagation",
+        "batch_example": "xai|XAI_API_KEY=<runtime-api-key>\nxai-management|XAI_MANAGEMENT_API_KEY=<management-api-key>",
+        "steps": [
+            "Create or select an xAI team API key with the required endpoint/model ACLs.",
+            "For future full-auto rotation, also store an xAI Management API key.",
+            "Use batch mode to store both the runtime key and management key at once.",
+        ],
+    },
+    "xai-management": {
+        "title": "xAI management key",
+        "summary": "Required for banto to create, check propagation for, and revoke xAI API keys automatically.",
+        "issuer_url": "https://console.x.ai/team/default/api-keys",
+        "automation": "banto sync xai-api-key xai --team-id <team_id> --wait-propagation",
+        "batch_example": "xai-management|XAI_MANAGEMENT_API_KEY=<management-api-key>\nxai|XAI_API_KEY=<runtime-api-key>",
+        "steps": [
+            "Create a management-capable key in xAI.",
+            "Store it under xai-management so banto can rotate XAI_API_KEY later.",
+            "Keep the runtime XAI_API_KEY separate from this management key.",
+        ],
+    },
+    "openai": {
+        "title": "OpenAI runtime key",
+        "summary": "Use the OpenAI service-account rotator for project-managed keys. Manual entry is a fallback.",
+        "issuer_url": "https://platform.openai.com/api-keys",
+        "automation": "banto sync openai-service-account openai --project-id <proj_...>",
+        "batch_example": "openai|OPENAI_API_KEY=<project-api-key>\nopenai-admin|OPENAI_ADMIN_KEY=<admin-key>",
+        "steps": [
+            "Prefer project service accounts for automated rotation.",
+            "Store an admin key separately as openai-admin when using the rotator.",
+            "Store runtime keys as openai.",
+        ],
+    },
+    "openai-admin": {
+        "title": "OpenAI admin key",
+        "summary": "Required only when using the OpenAI service-account rotator.",
+        "issuer_url": "https://platform.openai.com/settings/organization/admin-keys",
+        "automation": "banto sync openai-service-account openai --project-id <proj_...>",
+        "batch_example": "openai-admin|OPENAI_ADMIN_KEY=<admin-key>\nopenai|OPENAI_API_KEY=<project-api-key>",
+        "steps": [
+            "Create an admin key with project service-account management permission.",
+            "Store it under openai-admin.",
+            "Do not use the admin key as the app runtime OPENAI_API_KEY.",
+        ],
+    },
+    "google": {
+        "title": "Google API key",
+        "summary": "Use the Google API Keys API rotator for project-managed GOOGLE_API_KEY values.",
+        "issuer_url": "https://console.cloud.google.com/apis/credentials",
+        "automation": "banto sync google-api-key google --project-id <project>",
+        "batch_example": "google|GOOGLE_API_KEY=<google-api-key>\ngemini|GEMINI_API_KEY=<gemini-api-key>",
+        "steps": [
+            "Prefer the Google rotator for project-managed keys.",
+            "When a Gemini key shares the same account, opt in with --sync-shared-account-secrets.",
+            "Use batch mode when registering Google and Gemini fallbacks manually.",
+        ],
+    },
+    "github": {
+        "title": "GitHub token",
+        "summary": "GitHub issuance is still manual in banto; this screen reduces registration work after you create the token.",
+        "issuer_url": "https://github.com/settings/tokens",
+        "automation": "",
+        "batch_example": "github|GITHUB_TOKEN=<github-token>",
+        "steps": [
+            "Create a fine-grained token with the minimum required repositories and permissions.",
+            "Paste it here as github.",
+            "Use banto sync propagate github after replacing the stored value.",
+        ],
+    },
+    "cloudflare": {
+        "title": "Cloudflare API token",
+        "summary": "Cloudflare issuance is still manual in banto; store the new token here and propagate with banto sync.",
+        "issuer_url": "https://dash.cloudflare.com/profile/api-tokens",
+        "automation": "",
+        "batch_example": "cloudflare|CLOUDFLARE_API_TOKEN=<cloudflare-token>",
+        "steps": [
+            "Create a scoped API token in Cloudflare.",
+            "Paste it here as cloudflare.",
+            "Use banto sync propagate cloudflare for configured targets.",
+        ],
+    },
+    "stripe": {
+        "title": "Stripe secret key",
+        "summary": "Stripe secret key issuance is manual; webhook secrets remain a manual-cutover runbook item.",
+        "issuer_url": "https://dashboard.stripe.com/apikeys",
+        "automation": "",
+        "batch_example": "stripe|STRIPE_SECRET_KEY=<stripe-secret-key>",
+        "steps": [
+            "Create a restricted key where possible.",
+            "Store runtime secret keys as stripe.",
+            "Do not blind-overwrite webhook verification secrets.",
+        ],
+    },
+}
+
+
+def _normalize_register_item(data: dict) -> dict[str, str]:
+    """Validate a register payload without leaking the secret value."""
+    provider = (data.get("provider") or "").strip()
+    value = data.get("value") or ""
+    env_name = (data.get("env_name") or "").strip()
+    description = (data.get("description") or "").strip()
+
+    if not provider:
+        raise ValueError("Provider is required")
+    if not value:
+        raise ValueError("API key is required")
+
+    try:
+        provider = _validate_provider(provider)
+    except ValueError as exc:
+        raise ValueError(
+            "Invalid provider name. Use only letters, digits, hyphens, and underscores."
+        ) from exc
+
+    return {
+        "provider": provider,
+        "value": value,
+        "env_name": env_name,
+        "description": description,
+    }
 
 
 def _safe_attr(value: str) -> str:
@@ -61,6 +189,7 @@ def _safe_attr(value: str) -> str:
 def _build_html(provider_hint: str | None = None) -> str:
     """Build the single-page HTML for the registration form."""
     presets_json = json.dumps(PROVIDER_PRESETS)
+    guides_json = json.dumps(PROVIDER_GUIDES)
     hint_attr = _safe_attr(provider_hint or "")
 
     return f"""<!DOCTYPE html>
@@ -90,7 +219,7 @@ def _build_html(provider_hint: str | None = None) -> str:
     border-radius: 16px;
     padding: 40px 36px 36px;
     width: 100%;
-    max-width: 440px;
+    max-width: 560px;
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4),
                 0 0 0 1px rgba(255, 255, 255, 0.04);
   }}
@@ -114,6 +243,88 @@ def _build_html(provider_hint: str | None = None) -> str:
     font-size: 13px;
     color: #71717a;
     margin-top: 4px;
+  }}
+
+  .guide {{
+    margin: 0 0 18px;
+    padding: 14px;
+    background: #14141b;
+    border: 1px solid #2a2a35;
+    border-radius: 12px;
+    display: none;
+  }}
+
+  .guide-title {{
+    font-size: 14px;
+    font-weight: 700;
+    color: #f4f4f5;
+    margin-bottom: 4px;
+  }}
+
+  .guide-summary {{
+    font-size: 12px;
+    line-height: 1.5;
+    color: #a1a1aa;
+    margin-bottom: 10px;
+  }}
+
+  .guide-actions {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }}
+
+  .guide-link, .guide-code {{
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 6px 9px;
+    border-radius: 8px;
+    border: 1px solid #30303d;
+    color: #c4b5fd;
+    background: #111118;
+    font-size: 12px;
+    text-decoration: none;
+  }}
+
+  .guide-code {{
+    color: #d4d4d8;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  }}
+
+  .guide-steps {{
+    margin-left: 16px;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 1.5;
+  }}
+
+  .mode-row {{
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: #a1a1aa;
+    font-size: 13px;
+  }}
+
+  .mode-row input {{
+    width: 16px;
+    height: 16px;
+    accent-color: #8b5cf6;
+  }}
+
+  .batch-help {{
+    font-size: 12px;
+    color: #71717a;
+    margin-top: 6px;
+    line-height: 1.45;
+  }}
+
+  #batch-entries {{
+    min-height: 96px;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 12px;
   }}
 
   .field {{
@@ -280,10 +491,12 @@ def _build_html(provider_hint: str | None = None) -> str:
         <option value="">Select a provider...</option>
         <optgroup label="AI / LLM">
           <option value="openai">OpenAI</option>
+          <option value="openai-admin">OpenAI Admin Key</option>
           <option value="anthropic">Anthropic</option>
           <option value="gemini">Google Gemini</option>
           <option value="google">Google API</option>
           <option value="xai">xAI (Grok)</option>
+          <option value="xai-management">xAI Management Key</option>
         </optgroup>
         <optgroup label="Cloud / Infra">
           <option value="aws-access">AWS Access Key</option>
@@ -306,6 +519,26 @@ def _build_html(provider_hint: str | None = None) -> str:
         </optgroup>
         <option value="_custom">Custom...</option>
       </select>
+    </div>
+
+    <div class="guide" id="provider-guide"></div>
+
+    <div class="field">
+      <label class="mode-row" for="batch-mode">
+        <input type="checkbox" id="batch-mode">
+        Register multiple keys at once
+      </label>
+      <div class="batch-help">
+        Use one line per key: <span class="guide-code">provider|ENV_NAME=value</span>.
+        The secret value may contain additional equals signs.
+      </div>
+    </div>
+
+    <div class="field" id="batch-field" style="display:none">
+      <label for="batch-entries">Batch keys</label>
+      <textarea id="batch-entries" rows="5"
+                placeholder="xai|XAI_API_KEY=...\nxai-management|XAI_MANAGEMENT_API_KEY=..."
+                autocomplete="off" spellcheck="false"></textarea>
     </div>
 
     <div class="field" id="custom-provider-field" style="display:none">
@@ -347,9 +580,14 @@ def _build_html(provider_hint: str | None = None) -> str:
 <script>
 (function() {{
   const PRESETS = {presets_json};
+  const GUIDES = {guides_json};
   const HINT = document.getElementById("form").dataset.hint || "";
 
   const providerEl   = document.getElementById("provider");
+  const guideEl      = document.getElementById("provider-guide");
+  const batchModeEl  = document.getElementById("batch-mode");
+  const batchField   = document.getElementById("batch-field");
+  const batchEl      = document.getElementById("batch-entries");
   const customField   = document.getElementById("custom-provider-field");
   const customEl      = document.getElementById("custom-provider");
   const envNameEl     = document.getElementById("env-name");
@@ -378,6 +616,7 @@ def _build_html(provider_hint: str | None = None) -> str:
   }}
 
   providerEl.addEventListener("change", onProviderChange);
+  batchModeEl.addEventListener("change", onBatchModeChange);
 
   function onProviderChange() {{
     const v = providerEl.value;
@@ -389,6 +628,59 @@ def _build_html(provider_hint: str | None = None) -> str:
       customField.style.display = "none";
       customEl.value = "";
       envNameEl.value = PRESETS[v] || "";
+    }}
+    updateProviderGuide(v);
+  }}
+
+  function onBatchModeChange() {{
+    const enabled = batchModeEl.checked;
+    batchField.style.display = enabled ? "" : "none";
+    submitBtn.textContent = enabled ? "Store Keys in Keychain" : "Store in Keychain";
+    const guide = GUIDES[providerEl.value];
+    if (enabled && guide && guide.batch_example && !batchEl.value.trim()) {{
+      batchEl.value = guide.batch_example;
+    }}
+  }}
+
+  function escapeHtml(value) {{
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#x27;");
+  }}
+
+  function updateProviderGuide(provider) {{
+    const guide = GUIDES[provider];
+    if (!guide) {{
+      guideEl.style.display = "none";
+      guideEl.innerHTML = "";
+      return;
+    }}
+
+    let html = '<div class="guide-title">' + escapeHtml(guide.title) + '</div>'
+      + '<div class="guide-summary">' + escapeHtml(guide.summary) + '</div>'
+      + '<div class="guide-actions">';
+    if (guide.issuer_url) {{
+      html += '<a class="guide-link" href="' + escapeHtml(guide.issuer_url)
+        + '" target="_blank" rel="noreferrer">Open issuer console</a>';
+    }}
+    if (guide.automation) {{
+      html += '<span class="guide-code">' + escapeHtml(guide.automation) + '</span>';
+    }}
+    html += '</div>';
+    if (Array.isArray(guide.steps) && guide.steps.length) {{
+      html += '<ol class="guide-steps">';
+      guide.steps.forEach(function(step) {{
+        html += '<li>' + escapeHtml(step) + '</li>';
+      }});
+      html += '</ol>';
+    }}
+    guideEl.innerHTML = html;
+    guideEl.style.display = "block";
+    if (batchModeEl.checked && guide.batch_example && !batchEl.value.trim()) {{
+      batchEl.value = guide.batch_example;
     }}
   }}
 
@@ -411,62 +703,116 @@ def _build_html(provider_hint: str | None = None) -> str:
     resultEl.className = "result";
     resultEl.style.display = "none";
 
-    const provider = providerEl.value === "_custom"
-      ? customEl.value.trim()
-      : providerEl.value;
-
-    if (!provider) {{
-      showError("Please select or enter a provider.");
-      return;
-    }}
-
-    const value = apiKeyEl.value;
-    if (!value) {{
-      showError("Please enter an API key.");
-      return;
-    }}
-
     submitBtn.disabled = true;
-    submitBtn.textContent = "Storing...";
+    submitBtn.textContent = batchModeEl.checked ? "Storing keys..." : "Storing...";
 
     try {{
       const csrfResp = await fetch("/api/csrf-token");
       const csrfData = await csrfResp.json();
       const csrfToken = csrfData.token;
 
-      const resp = await fetch("/register", {{
-        method: "POST",
-        headers: {{
-          "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken
-        }},
-        body: JSON.stringify({{
-          provider: provider,
-          env_name: envNameEl.value.trim(),
-          value: value,
-          description: descEl.value.trim()
-        }})
-      }});
+      let resp;
+      let providerLabel;
+      if (batchModeEl.checked) {{
+        const items = parseBatchEntries(batchEl.value);
+        if (!items.length) {{
+          showError("Please enter at least one batch line.");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Store Keys in Keychain";
+          return;
+        }}
+        providerLabel = items.length + " key(s)";
+        resp = await fetch("/register-many", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken
+          }},
+          body: JSON.stringify({{ items: items }})
+        }});
+      }} else {{
+        const provider = providerEl.value === "_custom"
+          ? customEl.value.trim()
+          : providerEl.value;
+
+        if (!provider) {{
+          showError("Please select or enter a provider.");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Store in Keychain";
+          return;
+        }}
+
+        const value = apiKeyEl.value;
+        if (!value) {{
+          showError("Please enter an API key.");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Store in Keychain";
+          return;
+        }}
+
+        providerLabel = provider;
+        resp = await fetch("/register", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken
+          }},
+          body: JSON.stringify({{
+            provider: provider,
+            env_name: envNameEl.value.trim(),
+            value: value,
+            description: descEl.value.trim()
+          }})
+        }});
+      }}
+
       const data = await resp.json();
       if (data.ok) {{
         formEl.classList.add("form-hidden");
         resultEl.innerHTML = '<span class="check">\\u2714</span>'
           + '<strong>Stored securely</strong><br>'
           + '<span style="font-size:13px;color:#a1a1aa">'
-          + provider + ' &rarr; Keychain</span>'
+          + providerLabel + ' &rarr; Keychain</span>'
           + '<div class="close-hint">You can close this tab.</div>';
         resultEl.className = "result success";
       }} else {{
         showError(data.error || "Failed to store key.");
         submitBtn.disabled = false;
-        submitBtn.textContent = "Store in Keychain";
+        submitBtn.textContent = batchModeEl.checked ? "Store Keys in Keychain" : "Store in Keychain";
       }}
     }} catch (err) {{
-      showError("Connection error. Is the server running?");
+      showError(err.message || "Connection error. Is the server running?");
       submitBtn.disabled = false;
-      submitBtn.textContent = "Store in Keychain";
+      submitBtn.textContent = batchModeEl.checked ? "Store Keys in Keychain" : "Store in Keychain";
     }}
   }});
+
+  function parseBatchEntries(text) {{
+    const lines = text.split(/\\r?\\n/);
+    const items = [];
+    lines.forEach(function(rawLine) {{
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) {{
+        return;
+      }}
+      const eq = line.indexOf("=");
+      if (eq <= 0) {{
+        throw new Error("Invalid batch line: " + line);
+      }}
+      const left = line.slice(0, eq).trim();
+      const value = line.slice(eq + 1);
+      const pipe = left.indexOf("|");
+      const provider = (pipe >= 0 ? left.slice(0, pipe) : left).trim();
+      const envName = (pipe >= 0 ? left.slice(pipe + 1) : (PRESETS[provider] || "")).trim();
+      items.push({{
+        provider: provider,
+        env_name: envName,
+        value: value,
+        description: "Batch registration"
+      }});
+    }});
+    return items;
+  }}
 
   function showError(msg) {{
     resultEl.textContent = msg;
@@ -520,7 +866,7 @@ class _RegisterHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/register":
+        if path not in ("/register", "/register-many"):
             self.send_error(404)
             return
 
@@ -545,7 +891,8 @@ class _RegisterHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             self._json_response(400, {"ok": False, "error": "Invalid Content-Length"})
             return
-        if length > 65536:
+        max_payload = 262144 if path == "/register-many" else 65536
+        if length > max_payload:
             self._json_response(400, {"ok": False, "error": "Payload too large"})
             return
 
@@ -555,25 +902,8 @@ class _RegisterHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._json_response(400, {"ok": False, "error": "Invalid JSON"})
             return
-
-        provider = (data.get("provider") or "").strip()
-        value = data.get("value") or ""
-
-        if not provider:
-            self._json_response(
-                400, {"ok": False, "error": "Provider is required"}
-            )
-            return
-        if not value:
-            self._json_response(
-                400, {"ok": False, "error": "API key is required"}
-            )
-            return
-
-        try:
-            provider = _validate_provider(provider)
-        except ValueError:
-            self._json_response(400, {"ok": False, "error": "Invalid provider name. Use only letters, digits, hyphens, and underscores."})
+        if not isinstance(data, dict):
+            self._json_response(400, {"ok": False, "error": "Invalid JSON object"})
             return
 
         keychain = self.__class__.keychain
@@ -583,14 +913,37 @@ class _RegisterHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if keychain.store(provider, value):
-            self._json_response(200, {"ok": True})
-            # Schedule server shutdown after response is sent
+        try:
+            if path == "/register-many":
+                items = data.get("items")
+                if not isinstance(items, list) or not items:
+                    raise ValueError("At least one item is required")
+                if len(items) > 25:
+                    raise ValueError("At most 25 keys can be registered at once")
+                normalized = [_normalize_register_item(item) for item in items if isinstance(item, dict)]
+                if len(normalized) != len(items):
+                    raise ValueError("Each batch item must be an object")
+            else:
+                normalized = [_normalize_register_item(data)]
+        except ValueError as exc:
+            self._json_response(400, {"ok": False, "error": str(exc)})
+            return
+
+        stored: list[str] = []
+        for item in normalized:
+            if not keychain.store(item["provider"], item["value"]):
+                self._json_response(
+                    500,
+                    {"ok": False, "error": f"Failed to store {item['provider']} in Keychain"},
+                )
+                return
+            stored.append(item["provider"])
+
+        if stored:
+            self._json_response(200, {"ok": True, "count": len(stored), "providers": stored})
             callback = self.__class__.on_success
             if callable(callback):
-                threading.Thread(
-                    target=callback, daemon=True
-                ).start()
+                threading.Thread(target=callback, daemon=True).start()
         else:
             self._json_response(
                 500,
