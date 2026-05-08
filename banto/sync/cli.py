@@ -490,12 +490,8 @@ def cmd_sync_add(args: list[str]) -> None:
         if existing is None:
             # Try without prefix (raw Keychain service name).
             # Use ctypes to avoid exposing values in process arguments.
-            from ..keychain import _ctypes_get
-            import os
-            try:
-                _acct = os.getlogin()
-            except OSError:
-                _acct = os.environ.get("USER", "unknown")
+            from ..keychain import _ctypes_get, default_keychain_account
+            _acct = default_keychain_account()
             if _ctypes_get(account, _acct) is None:
                 print(f"Error: Keychain entry '{account}' not found.")
                 sys.exit(1)
