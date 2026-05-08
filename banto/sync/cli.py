@@ -268,16 +268,56 @@ def cmd_sync_incident_report(args: list[str]) -> None:
                 print(f"    notes:   {plan.notes}")
 
 
+def _print_sync_push_usage() -> None:
+    print("Usage: banto sync push [name] [--validate] [--json] [--config <path>]")
+
+
+def _parse_sync_push_args(args: list[str]) -> tuple[str | None, bool] | None:
+    """Parse sync push args before any secret reads or remote writes."""
+    if "-h" in args or "--help" in args:
+        _print_sync_push_usage()
+        return None
+
+    do_validate = False
+    name: str | None = None
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--config":
+            if i + 1 >= len(args):
+                print("Error: --config requires a path.", file=sys.stderr)
+                sys.exit(1)
+            i += 2
+            continue
+        if arg == "--validate":
+            do_validate = True
+            i += 1
+            continue
+        if arg == "--json":
+            i += 1
+            continue
+        if arg.startswith("--"):
+            print(f"Error: Unknown option for sync push: {arg}", file=sys.stderr)
+            _print_sync_push_usage()
+            sys.exit(1)
+        if name is not None:
+            print("Error: sync push accepts at most one secret name.", file=sys.stderr)
+            _print_sync_push_usage()
+            sys.exit(1)
+        name = arg
+        i += 1
+
+    return name, do_validate
+
+
 def cmd_sync_push(args: list[str]) -> None:
     """Push secrets from Keychain to all targets."""
-    config, _ = _load_config(args)
+    parsed = _parse_sync_push_args(args)
+    if parsed is None:
+        return
 
-    do_validate = "--validate" in args
-    name = None
-    for a in args:
-        if not a.startswith("--"):
-            name = a
-            break
+    name, do_validate = parsed
+    config, _ = _load_config(args)
 
     # Pre-push validation
     if do_validate:
