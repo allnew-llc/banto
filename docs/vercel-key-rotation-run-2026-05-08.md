@@ -92,11 +92,28 @@ Local validation:
 - `git diff --check`: passed.
 - `uv run pytest`: 327 passed.
 
+## Google/Gemini Rotation Result
+
+Status: completed for Vercel-managed Google/Gemini API keys in scope.
+
+No secret values were printed or written to this document.
+
+| Vercel project | Google Cloud project | New credential | Vercel envs | Runtime verification |
+|---|---|---|---|---|
+| `honntokoro-landing-page` | `gen-lang-client-0469915824` | API key `projects/402783811468/locations/global/keys/58c27495-6d64-4977-96f0-7bf767e6f36d` (`banto-google-api-key-20260508t134545z`) | `GOOGLE_API_KEY` production, `GEMINI_API_KEY` production | redeployed to `https://honntokoro-landing-page-1buvwlxf6-all-new.vercel.app`; `https://www.hontonotoko.jp` returned HTTP 200 |
+| `allnew-mobile-baas` | `gen-lang-client-0469915824` | same API key as above | `GOOGLE_AI_API_KEY` production, preview, development | redeployed to `https://allnew-mobile-baas-qcgnszq5p-all-new.vercel.app`; alias `https://allnew-mobile-baas.vercel.app`; `/api/health` returned HTTP 200; `/api/gemini/live-token` returned HTTP 405 to unauthenticated GET, confirming the route is deployed and POST-only |
+
+Follow-up cleanup:
+
+- Deleted previous Banto-managed Google API key `projects/402783811468/locations/global/keys/16739556-885c-4a50-89ad-7d26ba2068cf`.
+- Verified the Google Cloud project now has one Banto-managed API key, plus the separate `Xcode API key`, which was left untouched because it is not a Vercel-managed app credential.
+- Added local Banto sync config entry `google-ai-api-key` for `allnew-mobile-baas` so `GOOGLE_AI_API_KEY` is now managed by the same Keychain account as `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
+- Vercel metadata read-back showed `production`/`preview` entries as `sensitive`; `development` remains `encrypted` because Vercel does not allow `--sensitive` for development variables.
+
 ## Remaining Blockers
 
 | Area | Blocker | Safe unblock |
 |---|---|---|
-| Google auto-issuance | Google ADC is not configured locally | Run `gcloud auth application-default login`, confirm the Google Cloud project id, then run the Google API key rotator. |
 | Propagate-only providers | New provider keys are not available yet | Issue replacements in each provider dashboard, then use `banto sync propagate <name>` or the batch registration UI. |
 | Manual cutover secrets | Runtime compatibility and rollback are not confirmed | Follow `docs/manual-cutover-rotation-runbook.md` before any overwrite. |
 
