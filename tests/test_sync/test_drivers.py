@@ -230,6 +230,23 @@ class TestVercelDriver:
 
     @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
     @patch("banto.sync.drivers.vercel.subprocess.run")
+    def test_put_development_omits_sensitive_flag(self, mock_run, _):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=0),  # env add
+        ]
+        driver = VercelDriver()
+        assert driver.put("OPENAI_API_KEY", "val", "app", environments=["development"]) is True
+
+        env_add_call = mock_run.call_args_list[1]
+        cmd = env_add_call[0][0]
+        assert "development" in cmd
+        assert "--sensitive" not in cmd
+        assert "--force" in cmd
+        assert env_add_call.kwargs["input"] == "val"
+
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
     def test_delete_success(self, mock_run, _):
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link

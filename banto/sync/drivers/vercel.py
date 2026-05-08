@@ -75,7 +75,9 @@ class VercelDriver(PlatformDriver):
             all_ok = True
             for env in envs:
                 args = [vercel_bin, "env", "add", env_name, env,
-                        "--sensitive", "--force", "--yes", "--cwd", cwd]
+                        "--force", "--yes", "--cwd", cwd]
+                if env != "development":
+                    args.insert(args.index("--force"), "--sensitive")
                 if env == "preview":
                     args.insert(args.index(env) + 1, "")
                 result = subprocess.run(
