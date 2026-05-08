@@ -92,6 +92,30 @@ Local validation:
 - `git diff --check`: passed.
 - `uv run pytest`: 327 passed.
 
+### OpenAI Organization Migration
+
+Status: Vercel-managed `OPENAI_API_KEY` values were migrated from the
+individual-owned OpenAI organization to the `platform-admin@allnew.work`
+organization.
+
+No secret values were printed or written to this document.
+
+| Vercel project | New OpenAI project | New credential | Vercel envs | Runtime verification |
+|---|---|---|---|---|
+| `allnew-corporate` | `allnew-corporate` (`proj_6Yn80srRYmWL9S6yF2m0Apzw`) | service account `user-WPrTpXI38hp5vsuoEaJQGvBC`, API key id `key_vcta9hJeR7GrQ9qo` | `production` | redeployed to `https://allnew-corporate-4653gcyh4-all-new.vercel.app`; `https://allnew.work` returned HTTP 200; `/api/chat` returned HTTP 200 |
+| `honntokoro-landing-page` | `hontonotoko.jp` (`proj_Qre6UYE9e21gr289bJjo9HEP`) | service account `user-mkw0NLN8Z8T13kGVt21qBrm6`, API key id `key_TakuIOkrgCBBnwhZ` | `production`, `preview`, `development` | redeployed to `https://honntokoro-landing-page-cjhnm8vjs-all-new.vercel.app`; `https://www.hontonotoko.jp` returned HTTP 200; `/api/chat/speaker` returned HTTP 200 after billing credits were added |
+
+Migration notes:
+
+- Banto `openai-admin` now resolves to a `platform-admin@allnew.work` OpenAI
+  Admin Key from `keychain:banto-sync:openai-admin`.
+- The first production smoke after migration returned OpenAI `429` quota errors
+  for `honntokoro-landing-page`; adding credits to the new OpenAI organization
+  cleared the error without another key change.
+- Do not revoke old individual-owned OpenAI organization credentials until the
+  old organization can be accessed intentionally and the target service accounts
+  are confirmed there.
+
 ## Google/Gemini Rotation Result
 
 Status: completed for Vercel-managed Google/Gemini API keys in scope.
