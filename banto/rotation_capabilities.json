@@ -48,10 +48,125 @@
       "rule_id": "google_api_key",
       "provider": "google",
       "display_name": "Google API key",
-      "env_patterns": ["GOOGLE_API_KEY"],
+      "env_patterns": ["GOOGLE_API_KEY", "GOOGLE_AI_API_KEY"],
       "rotation_class": "full_auto",
       "implementation_phase": "phase_3",
       "notes": "Use Google Cloud API Keys API when the key is project-managed."
+    },
+    {
+      "rule_id": "database_credentials",
+      "provider": "database",
+      "display_name": "Database credential",
+      "env_patterns": [
+        "DATABASE_URL",
+        "DATABASE_URL_*",
+        "POSTGRES_URL",
+        "POSTGRES_URL_*",
+        "POSTGRES_PRISMA_URL",
+        "POSTGRES_DATABASE_URL",
+        "POSTGRES_DATABASE_URL_*",
+        "PGPASSWORD",
+        "POSTGRES_PGPASSWORD",
+        "POSTGRES_PASSWORD"
+      ],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Rotate database credentials with dual connection validation and rollback plan."
+    },
+    {
+      "rule_id": "non_secret_runtime_config",
+      "provider": "app",
+      "display_name": "Non-secret runtime config",
+      "env_patterns": [
+        "NEXT_PUBLIC_*",
+        "NEXTAUTH_URL",
+        "COMPANY_NAME",
+        "INVOICE_REGISTRATION_NUMBER",
+        "RESEND_FROM_DOMAIN",
+        "EKYC_PROVIDER",
+        "GEMINI_API_VERSION",
+        "GEMINI_LIVE_MODEL",
+        "BAAS_ALLOWED_APP_IDS",
+        "NEON_PROJECT_ID",
+        "POSTGRES_NEON_PROJECT_ID",
+        "POSTGRES_HOST",
+        "POSTGRES_PGHOST",
+        "POSTGRES_PGHOST_*",
+        "PGHOST",
+        "PGHOST_*",
+        "POSTGRES_USER",
+        "POSTGRES_PGUSER",
+        "PGUSER",
+        "POSTGRES_DATABASE",
+        "POSTGRES_PGDATABASE",
+        "PGDATABASE"
+      ],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Configuration or identifier; track coverage but do not rotate as a secret."
+    },
+    {
+      "rule_id": "upstash_redis_tokens",
+      "provider": "upstash",
+      "display_name": "Upstash Redis credential",
+      "env_patterns": ["UPSTASH_REDIS_REST_TOKEN", "UPSTASH_REDIS_REST_URL"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Rotate Redis credentials with provider-side token issuance and cache/session impact review."
+    },
+    {
+      "rule_id": "resend_api_key",
+      "provider": "resend",
+      "display_name": "Resend API key",
+      "env_patterns": ["RESEND_API_KEY"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Generate replacement in Resend, then store and propagate through banto."
+    },
+    {
+      "rule_id": "gbizinfo_api_token",
+      "provider": "gbizinfo",
+      "display_name": "gBizINFO API token",
+      "env_patterns": ["GBIZINFO_API_TOKEN"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Generate replacement at the provider, then store and propagate through banto."
+    },
+    {
+      "rule_id": "ekyc_api_key",
+      "provider": "ekyc",
+      "display_name": "eKYC API key",
+      "env_patterns": ["EKYC_API_KEY"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Generate replacement at the eKYC provider, then store and propagate through banto."
+    },
+    {
+      "rule_id": "webhook_secrets",
+      "provider": "webhook",
+      "display_name": "Webhook verification secret",
+      "env_patterns": ["EKYC_WEBHOOK_SECRET"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Webhook verification changes should be staged to avoid inbound delivery failures."
+    },
+    {
+      "rule_id": "nextauth_secret",
+      "provider": "auth",
+      "display_name": "NextAuth secret",
+      "env_patterns": ["NEXTAUTH_SECRET"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Rotate with session invalidation expectations and deployment coordination."
+    },
+    {
+      "rule_id": "admin_invite_code",
+      "provider": "app",
+      "display_name": "Application invite code",
+      "env_patterns": ["ADMIN_INVITE_CODE"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Rotate only after confirming active onboarding flows."
     },
     {
       "rule_id": "anthropic_api_key",

@@ -53,6 +53,7 @@ from .incident_report import INCIDENT_LANE_ORDER, LANE_LABELS, build_incident_re
 from .propagation import build_propagation_plan, propagate_secret, validate_propagation_plan
 from .smoke_presets import list_smoke_presets, smoke_preset_exists
 from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
+from .vercel_inventory import build_vercel_inventory_report, report_to_json
 
 
 def _is_json(args: list[str]) -> bool:
@@ -266,6 +267,79 @@ def cmd_sync_incident_report(args: list[str]) -> None:
                 print(f"    shared:  {', '.join(plan.shared_account_secret_names)}")
             if plan.notes:
                 print(f"    notes:   {plan.notes}")
+
+
+def cmd_sync_vercel_inventory(args: list[str]) -> None:
+    """Read-only inventory of Vercel env vars without values."""
+    config, _ = _load_config(args)
+    projects: list[str] = []
+    exclude_envs: list[str] = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--project" and i + 1 < len(args):
+            projects.append(args[i + 1])
+            i += 2
+            continue
+        if arg == "--exclude-env" and i + 1 < len(args):
+            exclude_envs.append(args[i + 1])
+            i += 2
+            continue
+        if arg in {"--config", "--json"}:
+            i += 2 if arg == "--config" else 1
+            continue
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync vercel-inventory --project <name> "
+                "[--project <name> ...] [--exclude-env ENV] [--json]"
+            )
+            return
+        print(f"Error: Unknown option for vercel-inventory: {arg}", file=sys.stderr)
+        sys.exit(1)
+
+    if not projects:
+        print(
+            "Usage: banto sync vercel-inventory --project <name> "
+            "[--project <name> ...] [--exclude-env ENV] [--json]"
+        )
+        sys.exit(1)
+
+    report = build_vercel_inventory_report(
+        config,
+        projects,
+        exclude_envs=exclude_envs,
+    )
+
+    if _is_json(args):
+        _json_out(report_to_json(report))
+        return
+
+    counts = report.counts_by_lane()
+    print(f"\nBANTO SYNC VERCEL INVENTORY — {len(report.items)} env var entrie(s)\n")
+    print("  Lane counts:")
+    print(f"  Rotate Now        {counts.get('rotate_now', 0):>3}")
+    print(f"  Manual Cutover    {counts.get('manual_cutover', 0):>3}")
+    print(f"  Monitor Only      {counts.get('monitor_only', 0):>3}")
+    print(f"  Review Required   {counts.get('review_required', 0):>3}")
+    print(f"  Excluded          {counts.get('excluded', 0):>3}")
+    print(f"\n  Unmanaged by sync:     {report.unmanaged_count()}")
+    print(f"  Needs sensitive flag:  {report.sensitive_upgrade_count()}")
+
+    current_project = None
+    for item in sorted(report.items, key=lambda x: (x.project, x.lane, x.env_name, x.targets)):
+        if item.project != current_project:
+            current_project = item.project
+            print(f"\n  [{current_project}]")
+        age = "?" if item.age_days is None else f"{item.age_days}d"
+        managed = "managed" if item.managed_by_sync else "unmanaged"
+        sensitive = "needs-sensitive" if item.needs_sensitive_upgrade else item.value_type
+        targets = ",".join(item.targets) or "-"
+        print(
+            f"    {item.lane:<14} {item.env_name:<36} "
+            f"{item.classification.provider:<14} {item.classification.rotation_class:<14} "
+            f"{sensitive:<15} {managed:<9} {age:<5} {targets}"
+        )
 
 
 def _print_sync_push_usage() -> None:
@@ -2266,6 +2340,7 @@ SYNC_COMMANDS = {
     "status": cmd_sync_status,
     "classify": cmd_sync_classify,
     "incident-report": cmd_sync_incident_report,
+    "vercel-inventory": cmd_sync_vercel_inventory,
     "push": cmd_sync_push,
     "add": cmd_sync_add,
     "google-api-key": cmd_sync_google_api_key,
@@ -2298,6 +2373,7 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  status              Show sync status matrix")
         print("  classify            Group secrets by rotation strategy")
         print("  incident-report     Prioritize secrets for incident response")
+        print("  vercel-inventory    Read-only Vercel env inventory without values")
         print("  validate            Test API keys against provider endpoints")
         print("  push [--validate]   Sync secrets to targets (--validate first)")
         print("  add <name> ...      Add a new secret")
