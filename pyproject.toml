@@ -39,4 +39,4 @@ banto-mcp = "banto.mcp_server:main"
 include = ["banto*"]
 
 [tool.setuptools.package-data]
-banto = ["config.json", "pricing.json"]
+banto = ["config.json", "pricing.json", "rotation_capabilities.json"]

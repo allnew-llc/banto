@@ -9,6 +9,7 @@ and never logged.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from inspect import signature
 from pathlib import Path
 
 from ..keychain import KeychainStore, KeyNotFoundError
@@ -84,7 +85,16 @@ def _sync_one_target(
         driver = get_driver(target.platform)
 
         project = target.file if target.platform == "local" else target.project
-        ok = driver.put(entry.env_name, value, project)
+        put_params = signature(driver.put).parameters
+        if "environments" in put_params:
+            ok = driver.put(
+                entry.env_name,
+                value,
+                project,
+                environments=target.environments,
+            )
+        else:
+            ok = driver.put(entry.env_name, value, project)
 
         result_str = "OK" if ok else "FAIL"
         audit.log_event("SYNC", entry.name, label, result_str, log_path=audit_log)

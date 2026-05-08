@@ -26,10 +26,7 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP(
-    "banto",
-    description="Local-first secret management — sync, validate, budget, leases",
-)
+mcp = FastMCP("banto")
 
 
 # ── Tool 1: sync_status (read-only) ──────────────────────────────
