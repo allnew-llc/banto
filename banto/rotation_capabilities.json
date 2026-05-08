@@ -1,0 +1,228 @@
+{
+  "rotation_classes": {
+    "full_auto": {
+      "summary": "New credential can be issued, stored, pushed, and the previous credential retired through a scripted flow.",
+      "operator_action": "Approve the run, monitor smoke tests, and confirm old credential revocation."
+    },
+    "partial_auto": {
+      "summary": "Some lifecycle steps can be automated, but credential issuance or retirement still needs provider-specific confirmation.",
+      "operator_action": "Use automation for inventory, validation, and propagation; keep issuance/revocation under human approval."
+    },
+    "propagate_only": {
+      "summary": "A new value can be safely propagated once obtained, but issuance is not yet standardized in banto.",
+      "operator_action": "Generate or copy the replacement value outside banto, then use banto to store and distribute it."
+    },
+    "inventory_only": {
+      "summary": "Value is non-secret or not worth rotating during incident response.",
+      "operator_action": "Track presence and target coverage only."
+    },
+    "manual_cutover": {
+      "summary": "Rotation changes runtime behavior and needs staged rollout, dual-read support, or coordinated endpoint changes.",
+      "operator_action": "Follow a dedicated runbook instead of blind overwrite."
+    },
+    "review_required": {
+      "summary": "No rule matched. Treat as unknown until reviewed.",
+      "operator_action": "Classify manually before automating."
+    }
+  },
+  "rules": [
+    {
+      "rule_id": "openai_api_key",
+      "provider": "openai",
+      "display_name": "OpenAI API key",
+      "env_patterns": ["OPENAI_API_KEY"],
+      "rotation_class": "full_auto",
+      "implementation_phase": "phase_3",
+      "notes": "Prefer project service accounts so issuance and retirement can be fully scripted."
+    },
+    {
+      "rule_id": "google_gemini_api_key",
+      "provider": "google_gemini",
+      "display_name": "Gemini API key",
+      "env_patterns": ["GEMINI_API_KEY"],
+      "rotation_class": "partial_auto",
+      "implementation_phase": "phase_3",
+      "notes": "Promote to full_auto only after project-level issuance path is proven in this workspace."
+    },
+    {
+      "rule_id": "google_api_key",
+      "provider": "google",
+      "display_name": "Google API key",
+      "env_patterns": ["GOOGLE_API_KEY"],
+      "rotation_class": "full_auto",
+      "implementation_phase": "phase_3",
+      "notes": "Use Google Cloud API Keys API when the key is project-managed."
+    },
+    {
+      "rule_id": "anthropic_api_key",
+      "provider": "anthropic",
+      "display_name": "Anthropic API key",
+      "env_patterns": ["ANTHROPIC_API_KEY"],
+      "rotation_class": "partial_auto",
+      "implementation_phase": "phase_4",
+      "notes": "Current public admin flows are suitable for inventory and retirement support; issuance should remain approval-gated."
+    },
+    {
+      "rule_id": "github_tokens",
+      "provider": "github",
+      "display_name": "GitHub token",
+      "env_patterns": ["GITHUB_TOKEN", "GITHUB_ACCESS_TOKEN"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Keep issuance provider-specific until a dedicated GitHub rotator exists."
+    },
+    {
+      "rule_id": "cloudflare_tokens",
+      "provider": "cloudflare",
+      "display_name": "Cloudflare API token",
+      "env_patterns": ["CLOUDFLARE_API_TOKEN", "CF_API_TOKEN"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Automate storage and propagation first; add provider-native issuance later."
+    },
+    {
+      "rule_id": "xai_api_key",
+      "provider": "xai",
+      "display_name": "xAI API key",
+      "env_patterns": ["XAI_API_KEY"],
+      "rotation_class": "full_auto",
+      "implementation_phase": "phase_3",
+      "notes": "Use xAI Management API with a separate management key for issuance and retirement."
+    },
+    {
+      "rule_id": "line_channel_tokens",
+      "provider": "line",
+      "display_name": "LINE channel credential",
+      "env_patterns": ["LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Rotation should be scripted only after LINE console/API issuance is standardized."
+    },
+    {
+      "rule_id": "line_operator_identity",
+      "provider": "line",
+      "display_name": "LINE operator identifier",
+      "env_patterns": ["LINE_OWNER_USER_ID"],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Identifier, not a secret."
+    },
+    {
+      "rule_id": "azure_client_secret",
+      "provider": "azure",
+      "display_name": "Azure client secret",
+      "env_patterns": ["AZURE_CLIENT_SECRET"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Treat secret creation as provider-specific until an Azure adapter is added."
+    },
+    {
+      "rule_id": "azure_identifiers",
+      "provider": "azure",
+      "display_name": "Azure identifiers",
+      "env_patterns": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Identifiers only; do not rotate during incident response."
+    },
+    {
+      "rule_id": "stripe_secret_key",
+      "provider": "stripe",
+      "display_name": "Stripe secret key",
+      "env_patterns": ["STRIPE_SECRET_KEY"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Automate propagation first; provider-specific issuance can come later."
+    },
+    {
+      "rule_id": "stripe_publishable_key",
+      "provider": "stripe",
+      "display_name": "Stripe publishable key",
+      "env_patterns": ["NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Public identifier; track coverage only."
+    },
+    {
+      "rule_id": "stripe_webhook_secret",
+      "provider": "stripe",
+      "display_name": "Stripe webhook secret",
+      "env_patterns": ["STRIPE_WEBHOOK_SECRET"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Needs coordinated endpoint cutover and potentially dual-secret verification."
+    },
+    {
+      "rule_id": "twilio_auth_token",
+      "provider": "twilio",
+      "display_name": "Twilio auth token",
+      "env_patterns": ["TWILIO_AUTH_TOKEN"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Start with safe redistribution workflow."
+    },
+    {
+      "rule_id": "twilio_identifiers",
+      "provider": "twilio",
+      "display_name": "Twilio identifiers",
+      "env_patterns": ["TWILIO_ACCOUNT_SID", "TWILIO_VERIFY_SERVICE_SID"],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Identifiers only; no urgent rotation value."
+    },
+    {
+      "rule_id": "zoom_client_secret",
+      "provider": "zoom",
+      "display_name": "Zoom client secret",
+      "env_patterns": ["ZOOM_CLIENT_SECRET"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Automate distribution first."
+    },
+    {
+      "rule_id": "zoom_identifiers",
+      "provider": "zoom",
+      "display_name": "Zoom identifiers",
+      "env_patterns": ["ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID"],
+      "rotation_class": "inventory_only",
+      "implementation_phase": "phase_0",
+      "notes": "Identifiers only; keep in coverage reports."
+    },
+    {
+      "rule_id": "zoom_webhook_secret",
+      "provider": "zoom",
+      "display_name": "Zoom webhook verification secret",
+      "env_patterns": ["ZOOM_WEBHOOK_SECRET_TOKEN"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Webhook verification changes should be staged to avoid inbound delivery failures."
+    },
+    {
+      "rule_id": "app_encryption_key",
+      "provider": "app",
+      "display_name": "Application encryption key",
+      "env_patterns": ["ENCRYPTION_KEY"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Requires dual-read / re-encrypt strategy before switching."
+    },
+    {
+      "rule_id": "app_hmac_secret",
+      "provider": "app",
+      "display_name": "Application HMAC secret",
+      "env_patterns": ["HMAC_SECRET"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Requires staged verifier support or coordinated token invalidation."
+    },
+    {
+      "rule_id": "app_cron_secret",
+      "provider": "app",
+      "display_name": "Application cron secret",
+      "env_patterns": ["CRON_SECRET"],
+      "rotation_class": "manual_cutover",
+      "implementation_phase": "phase_5",
+      "notes": "Rotate only with coordinated scheduler/client cutover."
+    }
+  ]
+}

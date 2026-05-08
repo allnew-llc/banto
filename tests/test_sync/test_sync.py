@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from banto.sync.config import SecretEntry, Target, SyncConfig
-from banto.sync.sync import check_status, remove_secret, sync_all, sync_secret
+from banto.sync.sync import _sync_one_target, check_status, remove_secret, sync_all, sync_secret
 
 
 @pytest.fixture
@@ -81,6 +81,62 @@ class TestSyncSecret:
         report = sync_secret(config, "openai", audit_log=tmp_path / "audit.log")
         assert not report.all_ok
         assert report.fail_count == 2
+
+    def test_sync_one_target_passes_environments_to_supported_driver(self, tmp_path):
+        class EnvAwareDriver:
+            def __init__(self):
+                self.environments = None
+
+            def put(self, env_name, value, project, environments=None):
+                self.environments = environments
+                return True
+
+        driver = EnvAwareDriver()
+        entry = SecretEntry(name="xai", account="xai", env_name="XAI_API_KEY")
+        target = Target(
+            platform="vercel",
+            project="voice-gateway",
+            environments=["production", "preview"],
+        )
+
+        with patch("banto.sync.sync.get_driver", return_value=driver):
+            result = _sync_one_target(
+                entry,
+                target,
+                "secret-value",
+                audit_log=tmp_path / "audit.log",
+            )
+
+        assert result.success is True
+        assert driver.environments == ["production", "preview"]
+
+    def test_sync_one_target_ignores_environments_for_legacy_driver(self, tmp_path):
+        class LegacyDriver:
+            def __init__(self):
+                self.called = False
+
+            def put(self, env_name, value, project):
+                self.called = True
+                return True
+
+        driver = LegacyDriver()
+        entry = SecretEntry(name="local", account="local", env_name="LOCAL_SECRET")
+        target = Target(
+            platform="local",
+            file=str(tmp_path / ".dev.vars"),
+            environments=["production"],
+        )
+
+        with patch("banto.sync.sync.get_driver", return_value=driver):
+            result = _sync_one_target(
+                entry,
+                target,
+                "secret-value",
+                audit_log=tmp_path / "audit.log",
+            )
+
+        assert result.success is True
+        assert driver.called is True
 
 
 class TestSyncAll:

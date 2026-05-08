@@ -2,7 +2,7 @@
 
 import pytest
 
-from banto.register_popup import _build_html, _safe_attr
+from banto.register_popup import _build_html, _normalize_register_item, _safe_attr
 
 
 # Codex-recommended XSS regression payloads
@@ -46,6 +46,42 @@ def test_provider_presets_populate_dropdown() -> None:
     html = _build_html()
     for provider in PROVIDER_PRESETS:
         assert f'value="{provider}"' in html, f"Missing dropdown option: {provider}"
+
+
+def test_provider_guides_render_provider_specific_help() -> None:
+    html = _build_html(provider_hint="xai")
+
+    assert "xAI management key" in html
+    assert "banto sync xai-api-key xai --team-id" in html
+    assert "xai-management|XAI_MANAGEMENT_API_KEY" in html
+    assert "Open issuer console" in html
+
+
+def test_batch_registration_ui_and_endpoint_are_present() -> None:
+    html = _build_html()
+
+    assert 'id="batch-mode"' in html
+    assert 'id="batch-entries"' in html
+    assert "/register-many" in html
+    assert "provider|ENV_NAME=value" in html
+
+
+def test_normalize_register_item_validates_without_leaking_value() -> None:
+    item = _normalize_register_item({
+        "provider": "XAI-Management",
+        "env_name": "XAI_MANAGEMENT_API_KEY",
+        "value": "secret-value",
+        "description": "desc",
+    })
+
+    assert item["provider"] == "xai-management"
+    assert item["env_name"] == "XAI_MANAGEMENT_API_KEY"
+    assert item["value"] == "secret-value"
+
+
+def test_normalize_register_item_rejects_invalid_provider() -> None:
+    with pytest.raises(ValueError, match="Invalid provider name"):
+        _normalize_register_item({"provider": "../bad", "value": "secret"})
 
 
 def test_custom_hint_sets_custom_field() -> None:
