@@ -3570,6 +3570,7 @@ def cmd_sync_validate(args: list[str]) -> None:
     """Validate API keys against provider endpoints.
 
     If sync.json has secrets, validates those.
+    If names are provided, validates only those sync-managed secrets.
     With --keychain flag, scans Keychain directly for known provider patterns.
     With --dry-run, shows which keys would be tested without sending them.
     """
@@ -3578,6 +3579,18 @@ def cmd_sync_validate(args: list[str]) -> None:
     config, _ = _load_config(args)
     scan_keychain = "--keychain" in args
     dry_run = "--dry-run" in args
+    requested_names: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--config":
+            i += 2
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        requested_names.append(arg)
+        i += 1
 
     keys_to_test: list[tuple[str, str]] = []  # (name, value)
 
@@ -3629,6 +3642,8 @@ def cmd_sync_validate(args: list[str]) -> None:
             for svc, acct in entries_found:
                 if not svc or svc in seen or should_exclude(svc):
                     continue
+                if requested_names and svc not in requested_names:
+                    continue
                 svc_lower = svc.lower()
                 for pattern in SERVICE_PATTERNS:
                     if pattern in svc_lower:
@@ -3647,7 +3662,20 @@ def cmd_sync_validate(args: list[str]) -> None:
     else:
         # Use sync.json secrets
         kc = KeychainStore(service_prefix=config.keychain_service)
-        for name, entry in config.secrets.items():
+        entries: list[tuple[str, SecretEntry]] = []
+        if requested_names:
+            missing = [name for name in requested_names if config.get_secret(name) is None]
+            if missing:
+                print(f"Error: Secret(s) not found: {', '.join(missing)}")
+                sys.exit(1)
+            entries = [
+                (name, config.get_secret(name))
+                for name in requested_names
+                if config.get_secret(name) is not None
+            ]
+        else:
+            entries = list(config.secrets.items())
+        for name, entry in entries:
             value = kc.get(entry.account)
             if value:
                 keys_to_test.append((name, value))
