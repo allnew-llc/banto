@@ -1169,6 +1169,7 @@ def _browser_issue_json_payload(result: BrowserIssueResult) -> dict:
         },
         "profile_dir": str(result.plan.profile_dir),
         "headless": result.plan.headless,
+        "allow_manual_cutover": result.plan.allow_manual_cutover,
         "metadata": result.metadata,
         "propagation": None
         if result.propagation is None else _propagation_json_payload(result.propagation),
@@ -1896,7 +1897,8 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
                 "[--profile-dir <dir>] [--headless] [--validate] "
                 "[--smoke '<command>' | --smoke-preset <name>] "
                 "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
-                "[--exposure-manifest <path>] [--dry-run] [--json]"
+                "[--exposure-manifest <path>] [--allow-manual-cutover] "
+                "[--dry-run] [--json]"
             )
             return
         if arg == "--recipe" and i + 1 < len(args):
@@ -1930,7 +1932,14 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         if arg in {"--config", "--smoke", "--smoke-preset"}:
             i += 2
             continue
-        if arg in {"--json", "--dry-run", "--headless", "--validate", "--revoke-headless"}:
+        if arg in {
+            "--json",
+            "--dry-run",
+            "--headless",
+            "--validate",
+            "--revoke-headless",
+            "--allow-manual-cutover",
+        }:
             i += 1
             continue
         if arg.startswith("--"):
@@ -1946,13 +1955,15 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             "[--profile-dir <dir>] [--headless] [--validate] "
             "[--smoke '<command>' | --smoke-preset <name>] "
             "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
-            "[--exposure-manifest <path>] [--dry-run] [--json]"
+            "[--exposure-manifest <path>] [--allow-manual-cutover] "
+            "[--dry-run] [--json]"
         )
         sys.exit(1)
 
     dry_run = "--dry-run" in args
     headless = "--headless" in args
     do_validate = "--validate" in args
+    allow_manual_cutover = "--allow-manual-cutover" in args
     smoke_command, smoke_preset = _parse_smoke_options(args)
     smoke_label = _format_smoke_label(smoke_command, smoke_preset)
     manifest = _load_exposure_manifest(exposure_manifest_path)
@@ -1969,6 +1980,7 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             recipe,
             profile_dir=profile_dir,
             headless=headless,
+            allow_manual_cutover=allow_manual_cutover,
         )
         retire_recipe = (
             load_browser_retirement_recipe(revoke_recipe_path)
@@ -2013,6 +2025,7 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             "ok": True,
             "dry_run": True,
             "validate": do_validate,
+            "allow_manual_cutover": allow_manual_cutover,
             "smoke": smoke_label,
             "smoke_preset": smoke_preset,
             "targets": list(plan.propagation_plan.targets),
@@ -2037,6 +2050,7 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         print(f"  profile_dir:   {plan.profile_dir}")
         print(f"  headless:      {'yes' if headless else 'no'}")
         print(f"  validate:      {'yes' if do_validate else 'no'}")
+        print(f"  manual_cutover:{' yes' if allow_manual_cutover else ' no'}")
         print(f"  smoke:         {smoke_label or '(none)'}")
         print(f"  revoke_after:  {retire_recipe.name if retire_recipe is not None else '(none)'}")
         print(f"  steps:         {len(plan.recipe.steps)}")
@@ -2060,6 +2074,7 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         retire_key_label=revoke_key_label,
         retire_profile_dir=revoke_profile_dir,
         retire_headless="--revoke-headless" in args or headless,
+        allow_manual_cutover=allow_manual_cutover,
     )
 
     if _is_json(args):
@@ -2105,6 +2120,38 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         if result.error:
             print(f"Error: {result.error}")
         sys.exit(1)
+
+
+def cmd_sync_quicktrust_credential(args: list[str]) -> None:
+    """Issue a QuickTrust dashboard credential through a browser recipe."""
+    if any(arg in {"-h", "--help"} for arg in args):
+        print(
+            "Usage: banto sync quicktrust-credential <name> --recipe <recipe.json> "
+            "[--profile-dir <dir>] [--headless] [--validate] "
+            "[--smoke '<command>' | --smoke-preset <name>] "
+            "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
+            "[--exposure-manifest <path>] [--dry-run] [--json]"
+        )
+        print()
+        print("Aliases: banto sync quicktrust-api-key, banto sync quicktrust-webhook-secret")
+        return
+
+    forwarded = list(args)
+    if "--allow-manual-cutover" not in forwarded:
+        forwarded.append("--allow-manual-cutover")
+    if "--profile-dir" not in forwarded:
+        forwarded.extend([
+            "--profile-dir",
+            str(
+                Path.home()
+                / ".local"
+                / "state"
+                / "banto"
+                / "browser-profiles"
+                / "quicktrust"
+            ),
+        ])
+    cmd_sync_browser_issue(forwarded)
 
 
 def cmd_sync_cloudflare_account_token(args: list[str]) -> None:
@@ -3840,6 +3887,9 @@ SYNC_COMMANDS = {
     "browser-record": cmd_sync_browser_record,
     "browser-issue": cmd_sync_browser_issue,
     "browser-revoke": cmd_sync_browser_revoke,
+    "quicktrust-credential": cmd_sync_quicktrust_credential,
+    "quicktrust-api-key": cmd_sync_quicktrust_credential,
+    "quicktrust-webhook-secret": cmd_sync_quicktrust_credential,
     "cloudflare-account-token": cmd_sync_cloudflare_account_token,
     "stripe-webhook-endpoint": cmd_sync_stripe_webhook_endpoint,
     "propagate": cmd_sync_propagate,
@@ -3881,6 +3931,7 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  browser-record <name> --start-url <url> --output <recipe.json>")
         print("  browser-issue <name> --recipe <recipe.json>")
         print("  browser-revoke <name> --recipe <recipe.json> --key-id <id>")
+        print("  quicktrust-credential <name> --recipe <recipe.json>")
         print("  cloudflare-account-token <name> --account-id <id> --policy-file <json>")
         print("  stripe-webhook-endpoint <name> --source-secret <secret> --url <https://...> --event <event>")
         print("  propagate <name>    Store + sync replacement value via common flow")

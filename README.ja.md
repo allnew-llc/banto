@@ -263,6 +263,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 | `banto sync openai-revoke-service-account` | OpenAI service accountを失効 |
 | `banto sync xai-api-key <name>` | management keyを使ってxAI runtime API keyを発行 |
 | `banto sync browser-issue <name>` | ローカルブラウザrecipeでキーを発行し、値を表示せずKeychainと同期先へ反映 |
+| `banto sync quicktrust-credential <name>` | QuickTrust管理画面のbrowser recipeでAPIキーまたはwebhook secretを発行 |
 | `banto sync cloudflare-account-token <name>` | Cloudflare Account API tokenを発行し、値を表示せず伝播 |
 | `banto sync stripe-webhook-endpoint <name>` | Stripe webhook endpointを作成し、署名secretを伝播 |
 | `banto sync propagate <name>` | 信頼済みローカルコマンドの置換値を保存・同期 |
