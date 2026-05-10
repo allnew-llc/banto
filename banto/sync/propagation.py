@@ -187,6 +187,11 @@ def run_smoke_preset_check(
     )
 
 
+def _requires_pre_store_validation(plan: PropagationPlan) -> bool:
+    """Return true for secrets that should never be propagated without a validator pass."""
+    return plan.provider == "stripe" and plan.env_name == "STRIPE_SECRET_KEY"
+
+
 def propagate_secret(
     config: SyncConfig,
     secret_name: str,
@@ -216,7 +221,7 @@ def propagate_secret(
             ),
         )
 
-    validation = validate_new_value(plan, value) if do_validate else None
+    validation = validate_new_value(plan, value) if do_validate or _requires_pre_store_validation(plan) else None
     if validation is not None and validation.status == "fail":
         return PropagationResult(
             plan=plan,

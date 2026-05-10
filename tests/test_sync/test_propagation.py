@@ -40,6 +40,11 @@ def propagate_config(tmp_path: Path) -> tuple[SyncConfig, Path]:
         account="hmac",
         env_name="HMAC_SECRET",
     ))
+    config.add_secret(SecretEntry(
+        name="stripe-live-secret",
+        account="stripe-live-secret",
+        env_name="STRIPE_SECRET_KEY",
+    ))
     config_path = tmp_path / "sync.json"
     config.save(config_path)
     return config, config_path
@@ -157,6 +162,35 @@ def test_propagate_secret_validation_fail_blocks_store(
     assert result.ok is False
     assert result.validation is not None
     mock_validate.assert_called_once_with("github", "bad")
+    mock_kc_cls.return_value.store.assert_not_called()
+    mock_hist_cls.return_value.record.assert_not_called()
+    mock_sync.assert_not_called()
+
+
+@patch("banto.sync.propagation.validate_key")
+@patch("banto.sync.propagation.sync_secret")
+@patch("banto.sync.propagation.HistoryStore")
+@patch("banto.sync.propagation.KeychainStore")
+def test_propagate_secret_auto_validates_stripe_secret_key(
+    mock_kc_cls,
+    mock_hist_cls,
+    mock_sync,
+    mock_validate,
+    propagate_config,
+):
+    config, _ = propagate_config
+    mock_validate.return_value = ValidationResult(
+        provider="stripe",
+        valid=False,
+        status="fail",
+        message="Invalid API key",
+    )
+
+    result = propagate_secret(config, "stripe-live-secret", "rk_live_restricted")
+
+    assert result.ok is False
+    assert result.validation is not None
+    mock_validate.assert_called_once_with("stripe", "rk_live_restricted")
     mock_kc_cls.return_value.store.assert_not_called()
     mock_hist_cls.return_value.record.assert_not_called()
     mock_sync.assert_not_called()
