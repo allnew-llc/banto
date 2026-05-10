@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +15,7 @@ from banto.sync.stripe_webhook_rotator import (
     CreatedStripeWebhookEndpoint,
     DeletedStripeWebhookEndpoint,
     build_stripe_webhook_endpoint_plan,
+    create_stripe_webhook_endpoint_with_cli,
     rotate_stripe_webhook_endpoint,
 )
 from banto.sync.sync import SyncReport
@@ -75,6 +76,34 @@ def test_build_stripe_webhook_plan_rejects_non_webhook(stripe_config):
         )
 
 
+@patch("banto.sync.stripe_webhook_rotator.subprocess.run")
+def test_create_stripe_webhook_endpoint_with_cli_parses_prefixed_json(mock_run, stripe_config):
+    config, _ = stripe_config
+    plan = build_stripe_webhook_endpoint_plan(
+        config,
+        "stripe-test-webhook",
+        source_secret_name="stripe-test-secret",
+        url="https://example.com/api/stripe/webhook",
+        enabled_events=("checkout.session.completed",),
+    )
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout=(
+            "This command will be executed on the account with the following details:\n"
+            '{"id":"we_cli","secret":"whsec_cli_secret","livemode":true,"status":"enabled"}\n'
+        ),
+    )
+
+    result = create_stripe_webhook_endpoint_with_cli(plan, live_mode=True)
+
+    assert result.endpoint_id == "we_cli"
+    assert result.signing_secret == "whsec_cli_secret"
+    assert result.livemode is True
+    argv = mock_run.call_args.args[0]
+    assert "--live" in argv
+    assert "checkout.session.completed" in argv
+
+
 @patch("banto.sync.stripe_webhook_rotator.propagate_secret")
 @patch("banto.sync.stripe_webhook_rotator.delete_stripe_webhook_endpoint")
 @patch("banto.sync.stripe_webhook_rotator.create_stripe_webhook_endpoint")
@@ -112,6 +141,43 @@ def test_rotate_stripe_webhook_propagates_and_deletes_previous_without_returning
     mock_delete.assert_called_once()
     assert result.deleted_previous_endpoint is not None
     assert result.deleted_previous_endpoint.deleted is True
+
+
+@patch("banto.sync.stripe_webhook_rotator.propagate_secret")
+@patch("banto.sync.stripe_webhook_rotator.delete_stripe_webhook_endpoint_with_cli")
+@patch("banto.sync.stripe_webhook_rotator.create_stripe_webhook_endpoint_with_cli")
+def test_rotate_stripe_webhook_uses_cli_auth_when_requested(
+    mock_create_cli,
+    mock_delete_cli,
+    mock_propagate,
+    stripe_config,
+):
+    config, _ = stripe_config
+    mock_create_cli.return_value = CreatedStripeWebhookEndpoint(
+        endpoint_id="we_cli",
+        signing_secret="whsec_cli_secret",
+        livemode=True,
+    )
+    mock_delete_cli.return_value = DeletedStripeWebhookEndpoint(endpoint_id="we_old", deleted=True)
+    mock_propagate.return_value = _propagation_result(config)
+
+    result = rotate_stripe_webhook_endpoint(
+        config,
+        "stripe-test-webhook",
+        source_secret_name="stripe-test-secret",
+        url="https://example.com/api/stripe/webhook",
+        enabled_events=("checkout.session.completed",),
+        delete_previous_endpoint_id="we_old",
+        use_stripe_cli_auth=True,
+        stripe_cli_live_mode=True,
+    )
+
+    assert result.ok is True
+    assert result.stripe_key_source == "stripe-cli:live"
+    mock_create_cli.assert_called_once()
+    assert mock_create_cli.call_args.kwargs["live_mode"] is True
+    mock_delete_cli.assert_called_once_with("we_old", live_mode=True)
+    assert mock_propagate.call_args.kwargs["allow_manual_cutover"] is True
 
 
 @patch("banto.sync.stripe_webhook_rotator.propagate_secret")
