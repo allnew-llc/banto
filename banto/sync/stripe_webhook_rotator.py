@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -192,6 +193,40 @@ def _stripe_error_message(body: str) -> str:
     return body[:200]
 
 
+def _parse_stripe_cli_json(raw: str, *, command: str) -> dict:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end < start:
+        raise StripeWebhookRotatorError(f"Stripe CLI {command} returned no JSON payload.")
+    try:
+        parsed = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise StripeWebhookRotatorError(
+            f"Stripe CLI {command} returned invalid JSON."
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise StripeWebhookRotatorError(
+            f"Stripe CLI {command} returned unexpected payload type."
+        )
+    return parsed
+
+
+def _run_stripe_cli_json(argv: list[str], *, command: str, timeout: int = 30) -> dict:
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise StripeWebhookRotatorError("Stripe CLI was not found on PATH.") from None
+    except subprocess.TimeoutExpired as exc:
+        raise StripeWebhookRotatorError(
+            f"Stripe CLI {command} timed out ({timeout}s)."
+        ) from exc
+    if result.returncode != 0:
+        raise StripeWebhookRotatorError(
+            f"Stripe CLI {command} failed with exit {result.returncode}."
+        )
+    return _parse_stripe_cli_json(result.stdout, command=command)
+
+
 def create_stripe_webhook_endpoint(
     plan: StripeWebhookEndpointPlan,
     *,
@@ -233,6 +268,49 @@ def create_stripe_webhook_endpoint(
     )
 
 
+def create_stripe_webhook_endpoint_with_cli(
+    plan: StripeWebhookEndpointPlan,
+    *,
+    live_mode: bool = False,
+    timeout: int = 30,
+) -> CreatedStripeWebhookEndpoint:
+    """Create a Stripe webhook endpoint through logged-in Stripe CLI auth."""
+    argv = [
+        "stripe",
+        "webhook_endpoints",
+        "create",
+        "--confirm",
+        "--url",
+        plan.url,
+    ]
+    for event in plan.enabled_events:
+        argv.extend(["--enabled-events", event])
+    if plan.description:
+        argv.extend(["--description", plan.description])
+    if plan.api_version:
+        argv.extend(["--api-version", plan.api_version])
+    if plan.connect:
+        argv.extend(["--connect", "true"])
+    if live_mode:
+        argv.append("--live")
+
+    response = _run_stripe_cli_json(argv, command="webhook_endpoints create", timeout=timeout)
+    endpoint_id = response.get("id")
+    signing_secret = response.get("secret")
+    if not isinstance(endpoint_id, str) or not endpoint_id:
+        raise StripeWebhookRotatorError("Stripe CLI webhook response did not include an endpoint id.")
+    if not isinstance(signing_secret, str) or not signing_secret:
+        raise StripeWebhookRotatorError("Stripe CLI webhook response did not include a signing secret.")
+    livemode = response.get("livemode")
+    status = response.get("status")
+    return CreatedStripeWebhookEndpoint(
+        endpoint_id=endpoint_id,
+        signing_secret=signing_secret,
+        livemode=livemode if isinstance(livemode, bool) else None,
+        status=status if isinstance(status, str) else None,
+    )
+
+
 def delete_stripe_webhook_endpoint(
     endpoint_id: str,
     *,
@@ -257,6 +335,27 @@ def delete_stripe_webhook_endpoint(
     )
 
 
+def delete_stripe_webhook_endpoint_with_cli(
+    endpoint_id: str,
+    *,
+    live_mode: bool = False,
+    timeout: int = 30,
+) -> DeletedStripeWebhookEndpoint:
+    """Delete a Stripe webhook endpoint through logged-in Stripe CLI auth."""
+    argv = ["stripe", "webhook_endpoints", "delete", endpoint_id, "--confirm"]
+    if live_mode:
+        argv.append("--live")
+
+    response = _run_stripe_cli_json(argv, command="webhook_endpoints delete", timeout=timeout)
+    response_id = response.get("id")
+    deleted = response.get("deleted") is True
+    return DeletedStripeWebhookEndpoint(
+        endpoint_id=response_id if isinstance(response_id, str) and response_id else endpoint_id,
+        deleted=deleted,
+        message="" if deleted else "Stripe CLI delete response did not confirm deletion.",
+    )
+
+
 def _safe_delete_stripe_webhook_endpoint(
     endpoint_id: str,
     *,
@@ -264,6 +363,21 @@ def _safe_delete_stripe_webhook_endpoint(
 ) -> DeletedStripeWebhookEndpoint:
     try:
         return delete_stripe_webhook_endpoint(endpoint_id, api_key=api_key)
+    except StripeWebhookRotatorError as exc:
+        return DeletedStripeWebhookEndpoint(
+            endpoint_id=endpoint_id,
+            deleted=False,
+            message=str(exc),
+        )
+
+
+def _safe_delete_stripe_webhook_endpoint_with_cli(
+    endpoint_id: str,
+    *,
+    live_mode: bool,
+) -> DeletedStripeWebhookEndpoint:
+    try:
+        return delete_stripe_webhook_endpoint_with_cli(endpoint_id, live_mode=live_mode)
     except StripeWebhookRotatorError as exc:
         return DeletedStripeWebhookEndpoint(
             endpoint_id=endpoint_id,
@@ -286,6 +400,8 @@ def rotate_stripe_webhook_endpoint(
     do_validate: bool = False,
     smoke_command: str | None = None,
     smoke_preset: str | None = None,
+    use_stripe_cli_auth: bool = False,
+    stripe_cli_live_mode: bool = False,
 ) -> StripeWebhookRotationResult:
     """Create a Stripe webhook endpoint and propagate its signing secret."""
     plan = build_stripe_webhook_endpoint_plan(
@@ -298,8 +414,31 @@ def rotate_stripe_webhook_endpoint(
         api_version=api_version,
         connect=connect,
     )
-    api_key, key_source = resolve_stripe_api_key(config, plan.source_secret_name)
-    created = create_stripe_webhook_endpoint(plan, api_key=api_key)
+    api_key = None
+    if use_stripe_cli_auth:
+        key_source = f"stripe-cli:{'live' if stripe_cli_live_mode else 'test'}"
+        created = create_stripe_webhook_endpoint_with_cli(
+            plan,
+            live_mode=stripe_cli_live_mode,
+        )
+    else:
+        api_key, key_source = resolve_stripe_api_key(config, plan.source_secret_name)
+        created = create_stripe_webhook_endpoint(plan, api_key=api_key)
+
+    def delete_created(endpoint_id: str) -> DeletedStripeWebhookEndpoint:
+        if use_stripe_cli_auth:
+            return _safe_delete_stripe_webhook_endpoint_with_cli(
+                endpoint_id,
+                live_mode=stripe_cli_live_mode,
+            )
+        if api_key is None:
+            return DeletedStripeWebhookEndpoint(
+                endpoint_id=endpoint_id,
+                deleted=False,
+                message="Stripe API key was not resolved.",
+            )
+        return _safe_delete_stripe_webhook_endpoint(endpoint_id, api_key=api_key)
+
     try:
         propagation = propagate_secret(
             config,
@@ -311,10 +450,7 @@ def rotate_stripe_webhook_endpoint(
             allow_manual_cutover=True,
         )
     except Exception as exc:
-        cleanup = _safe_delete_stripe_webhook_endpoint(
-            created.endpoint_id,
-            api_key=api_key,
-        )
+        cleanup = delete_created(created.endpoint_id)
         error = f"Propagation raised {type(exc).__name__} after creating Stripe webhook endpoint."
         if not cleanup.deleted:
             error += f" Cleanup failed: {cleanup.message}"
@@ -327,10 +463,7 @@ def rotate_stripe_webhook_endpoint(
             error=error,
         )
     if not propagation.ok:
-        cleanup = _safe_delete_stripe_webhook_endpoint(
-            created.endpoint_id,
-            api_key=api_key,
-        )
+        cleanup = delete_created(created.endpoint_id)
         error = "Propagation failed after creating Stripe webhook endpoint."
         if not cleanup.deleted:
             error += f" Cleanup failed: {cleanup.message}"
@@ -346,10 +479,7 @@ def rotate_stripe_webhook_endpoint(
     deleted_previous = None
     error = None
     if delete_previous_endpoint_id:
-        deleted_previous = _safe_delete_stripe_webhook_endpoint(
-            delete_previous_endpoint_id,
-            api_key=api_key,
-        )
+        deleted_previous = delete_created(delete_previous_endpoint_id)
         if not deleted_previous.deleted:
             error = f"Previous Stripe webhook endpoint delete failed: {deleted_previous.message}"
 

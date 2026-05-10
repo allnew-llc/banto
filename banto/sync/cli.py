@@ -2303,6 +2303,8 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
     api_version = None
     connect = False
     delete_previous_endpoint_id = None
+    use_stripe_cli_auth = False
+    stripe_cli_live_mode = False
 
     i = 0
     while i < len(args):
@@ -2314,6 +2316,7 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
                 "--event <event> [--event <event> ...] [--description <text>] "
                 "[--api-version <version>] [--connect] "
                 "[--delete-previous-endpoint <endpoint_id>] "
+                "[--stripe-cli-auth [--live]] "
                 "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
             )
             return
@@ -2345,6 +2348,14 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
             delete_previous_endpoint_id = args[i + 1]
             i += 2
             continue
+        if arg == "--stripe-cli-auth":
+            use_stripe_cli_auth = True
+            i += 1
+            continue
+        if arg == "--live":
+            stripe_cli_live_mode = True
+            i += 1
+            continue
         if arg in {"--config", "--smoke", "--smoke-preset"}:
             i += 2
             continue
@@ -2365,6 +2376,7 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
             "--event <event> [--event <event> ...] [--description <text>] "
             "[--api-version <version>] [--connect] "
             "[--delete-previous-endpoint <endpoint_id>] "
+            "[--stripe-cli-auth [--live]] "
             "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
         )
         sys.exit(1)
@@ -2373,6 +2385,9 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
     do_validate = "--validate" in args
     smoke_command, smoke_preset = _parse_smoke_options(args)
     smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+    if stripe_cli_live_mode and not use_stripe_cli_auth:
+        print("Error: --live is only valid with --stripe-cli-auth.")
+        sys.exit(1)
 
     try:
         config, _ = _load_config(args)
@@ -2404,6 +2419,8 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
             "enabled_events": list(plan.enabled_events),
             "connect": plan.connect,
             "delete_previous_endpoint_id": delete_previous_endpoint_id,
+            "stripe_cli_auth": use_stripe_cli_auth,
+            "stripe_cli_live_mode": stripe_cli_live_mode,
             "validate": do_validate,
             "smoke": smoke_label,
             "smoke_preset": smoke_preset,
@@ -2420,6 +2437,7 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
         print(f"  events:         {', '.join(plan.enabled_events)}")
         print(f"  connect:        {'yes' if plan.connect else 'no'}")
         print(f"  delete_previous:{delete_previous_endpoint_id or '(none)'}")
+        print(f"  stripe_cli:     {'live' if stripe_cli_live_mode else 'test' if use_stripe_cli_auth else 'no'}")
         print(f"  validate:       {'yes' if do_validate else 'no'}")
         print(f"  smoke:          {smoke_label or '(none)'}")
         print(f"  targets:        {len(plan.propagation_plan.targets)}")
@@ -2443,6 +2461,8 @@ def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
             do_validate=do_validate,
             smoke_command=smoke_command,
             smoke_preset=smoke_preset,
+            use_stripe_cli_auth=use_stripe_cli_auth,
+            stripe_cli_live_mode=stripe_cli_live_mode,
         )
     except StripeWebhookRotatorError as exc:
         if _is_json(args):
