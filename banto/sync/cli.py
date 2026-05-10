@@ -38,6 +38,11 @@ from .browser_recorder import (
     build_browser_recording_plan,
     record_browser_recipe,
 )
+from .browser_batch import (
+    BrowserBatchResult,
+    load_browser_batch_plan,
+    run_browser_batch,
+)
 from .cloudflare_token_rotator import (
     DEFAULT_CREATOR_ACCOUNT as DEFAULT_CLOUDFLARE_CREATOR_ACCOUNT,
     DEFAULT_CREATOR_TOKEN_ENV as DEFAULT_CLOUDFLARE_CREATOR_TOKEN_ENV,
@@ -1228,6 +1233,36 @@ def _browser_recording_json_payload(result: BrowserRecordingResult) -> dict:
     }
 
 
+def _browser_batch_json_payload(result: BrowserBatchResult) -> dict:
+    return {
+        "ok": result.ok,
+        "dry_run": result.dry_run,
+        "name": result.plan.name,
+        "fail_fast": result.plan.fail_fast,
+        "items": [
+            {
+                "name": outcome.name,
+                "ok": outcome.ok,
+                "skipped": outcome.skipped,
+                "dry_run": outcome.dry_run,
+                "provider": outcome.provider,
+                "recipe": outcome.recipe_name,
+                "targets": list(outcome.targets),
+                "retirement_planned": outcome.retirement_planned,
+                "revoke_key_id": outcome.revoke_key_id,
+                "propagation": None
+                if outcome.result is None or outcome.result.propagation is None
+                else _propagation_json_payload(outcome.result.propagation),
+                "retirement": None
+                if outcome.result is None or outcome.result.retirement is None
+                else _browser_retirement_json_payload(outcome.result.retirement),
+                "error": outcome.error,
+            }
+            for outcome in result.outcomes
+        ],
+    }
+
+
 def _cloudflare_rotation_json_payload(result) -> dict:
     return {
         "ok": result.ok,
@@ -1769,6 +1804,75 @@ def cmd_sync_browser_revoke(args: list[str]) -> None:
         print(f"Retired browser-managed credential: {result.plan.key_id}")
     else:
         print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_browser_batch(args: list[str]) -> None:
+    """Run a batch of closed-loop browser key rotations."""
+    plan_path = None
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync browser-batch <plan.json> "
+                "[--dry-run] [--json]"
+            )
+            return
+        if arg in {"--config"}:
+            i += 2
+            continue
+        if arg in {"--dry-run", "--json"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if plan_path is None:
+            plan_path = arg
+        i += 1
+
+    if not plan_path:
+        print("Usage: banto sync browser-batch <plan.json> [--dry-run] [--json]")
+        sys.exit(1)
+
+    try:
+        config, _ = _load_config(args)
+        plan = load_browser_batch_plan(plan_path)
+        result = run_browser_batch(
+            config,
+            plan,
+            dry_run="--dry-run" in args,
+        )
+    except (BrowserIssuerError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out(_browser_batch_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    mode = "Dry run" if result.dry_run else "Run"
+    print(f"\nBANTO SYNC BROWSER BATCH — {mode}: {result.plan.name}\n")
+    for outcome in result.outcomes:
+        if outcome.skipped:
+            print(f"  SKIP  {outcome.name}")
+            continue
+        mark = "OK" if outcome.ok else "FAIL"
+        retire = " + revoke" if outcome.retirement_planned else ""
+        print(f"  {mark:<4} {outcome.name}{retire}")
+        if outcome.recipe_name:
+            print(f"       recipe:  {outcome.recipe_name}")
+        if outcome.targets:
+            print(f"       targets: {', '.join(outcome.targets)}")
+        if outcome.error:
+            print(f"       error:   {outcome.error}")
+    if not result.ok:
         sys.exit(1)
 
 
@@ -3684,6 +3788,7 @@ SYNC_COMMANDS = {
     "openai-service-accounts": cmd_sync_openai_service_accounts,
     "openai-revoke-service-account": cmd_sync_openai_revoke_service_account,
     "xai-api-key": cmd_sync_xai_api_key,
+    "browser-batch": cmd_sync_browser_batch,
     "browser-record": cmd_sync_browser_record,
     "browser-issue": cmd_sync_browser_issue,
     "browser-revoke": cmd_sync_browser_revoke,
@@ -3724,6 +3829,7 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  openai-service-accounts --project-id <proj_...>")
         print("  openai-revoke-service-account --project-id <proj_...> --service-account-id <svc_...>")
         print("  xai-api-key <name> --team-id <team_id>")
+        print("  browser-batch <plan.json>")
         print("  browser-record <name> --start-url <url> --output <recipe.json>")
         print("  browser-issue <name> --recipe <recipe.json>")
         print("  browser-revoke <name> --recipe <recipe.json> --key-id <id>")

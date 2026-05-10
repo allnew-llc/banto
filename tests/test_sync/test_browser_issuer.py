@@ -23,7 +23,12 @@ from banto.sync.browser_recorder import (
     recipe_dict_from_recorded_actions,
     record_browser_recipe,
 )
+from banto.sync.browser_batch import (
+    load_browser_batch_plan,
+    run_browser_batch,
+)
 from banto.sync.cli import (
+    cmd_sync_browser_batch,
     cmd_sync_browser_issue,
     cmd_sync_browser_record,
     cmd_sync_browser_revoke,
@@ -433,3 +438,75 @@ def test_cmd_sync_browser_revoke_dry_run(mock_retire, browser_config, tmp_path, 
     assert payload["dry_run"] is True
     assert payload["key_id"] == "tok_old_123"
     mock_retire.assert_not_called()
+
+
+def test_browser_batch_dry_run_validates_issue_and_retirement(browser_config, tmp_path):
+    config, _ = browser_config
+    recipe_path = _recipe_file(tmp_path)
+    revoke_path = _retirement_recipe_file(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "version": 1,
+        "key_id": "tok_old_123",
+        "revoke_recipe": str(revoke_path),
+    }), encoding="utf-8")
+    plan_path = tmp_path / "batch.json"
+    plan_path.write_text(json.dumps({
+        "version": 1,
+        "name": "requested-keys",
+        "items": [
+            {
+                "name": "github",
+                "recipe": str(recipe_path),
+                "exposure_manifest": str(manifest_path),
+            }
+        ],
+    }), encoding="utf-8")
+
+    plan = load_browser_batch_plan(plan_path)
+    result = run_browser_batch(config, plan, dry_run=True)
+
+    assert result.ok is True
+    assert result.outcomes[0].retirement_planned is True
+    assert result.outcomes[0].revoke_key_id == "tok_old_123"
+
+
+@patch("banto.sync.cli.run_browser_batch")
+def test_cmd_sync_browser_batch_json(mock_batch, browser_config, tmp_path, capsys):
+    config, config_path = browser_config
+    recipe = browser_recipe_from_dict(_recipe_dict())
+    plan = build_browser_issue_plan(config, "github", recipe)
+    from banto.sync.browser_batch import (
+        BrowserBatchItemOutcome,
+        BrowserBatchPlan,
+        BrowserBatchResult,
+    )
+    mock_batch.return_value = BrowserBatchResult(
+        plan=BrowserBatchPlan(name="batch", items=()),
+        outcomes=(BrowserBatchItemOutcome(
+            name="github",
+            ok=True,
+            skipped=False,
+            dry_run=True,
+            provider="github",
+            recipe_name=plan.recipe.name,
+            targets=plan.propagation_plan.targets,
+        ),),
+        dry_run=True,
+    )
+    batch_path = tmp_path / "batch.json"
+    batch_path.write_text(json.dumps({
+        "version": 1,
+        "items": [{"name": "github", "recipe": str(_recipe_file(tmp_path))}],
+    }), encoding="utf-8")
+
+    cmd_sync_browser_batch([
+        str(batch_path),
+        "--dry-run",
+        "--json",
+        "--config", str(config_path),
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["items"][0]["name"] == "github"

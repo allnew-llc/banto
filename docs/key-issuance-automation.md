@@ -10,6 +10,7 @@ automate them without exposing secret values to agents.
 | Provider API | Provider exposes an API that returns a new one-time secret value | provider-specific `banto sync ...` command |
 | Browser recipe | Provider only exposes a console flow | `banto sync browser-issue ... --recipe ...` |
 | Browser record/reissue/revoke | Provider console flow must be learned first | `banto sync browser-record ...`, then `browser-issue --exposure-manifest ...` |
+| Browser batch | Multiple console-only keys need the same closed-loop run | `banto sync browser-batch <plan.json>` |
 | Existing Keychain import | A usable credential already exists under another local Keychain service | `banto sync import-keychain ... --from-service ...` |
 | Propagate only | Replacement value is obtained by another trusted local command | `banto sync propagate ... --from-cli ...` |
 | Manual cutover | Runtime behavior changes and needs rollout coordination | dedicated runbook |

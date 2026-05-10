@@ -263,6 +263,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto sync openai-service-accounts` | List OpenAI service accounts without exposing key values |
 | `banto sync openai-revoke-service-account` | Revoke an OpenAI service account |
 | `banto sync xai-api-key <name>` | Issue an xAI runtime API key using a management key |
+| `banto sync browser-batch <plan.json>` | Run multiple closed-loop browser rotations from one metadata-only plan |
 | `banto sync browser-record <name>` | Record a provider console flow into a reusable browser recipe without writing secret values |
 | `banto sync browser-issue <name>` | Issue a key through a local browser recipe, then store and sync without printing the value |
 | `banto sync browser-revoke <name>` | Revoke a browser-managed key by provider key id/label after replacement is live |

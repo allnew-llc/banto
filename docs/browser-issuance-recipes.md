@@ -40,6 +40,8 @@ banto sync browser-revoke github \
   --recipe recipes/github-token-revoke.json \
   --key-id <provider-key-id> \
   --dry-run
+
+banto sync browser-batch examples/07_browser_rotation_batch.example.json --dry-run
 ```
 
 Dry-run before live runs:
@@ -160,6 +162,32 @@ or label, never the secret value:
 `banto sync browser-issue --exposure-manifest ...` issues a replacement, stores
 and syncs it, runs validation/smoke checks when requested, and only then runs the
 retirement recipe for the exposed key id.
+
+## Batch Plan
+
+Use `banto sync browser-batch <plan.json>` to run multiple closed-loop browser
+rotations in sequence. Batch plans are metadata-only and reference recipe files
+and exposure manifests; they must never contain secret values.
+
+```json
+{
+  "version": 1,
+  "name": "requested-provider-console-keys",
+  "fail_fast": true,
+  "defaults": {
+    "headless": false,
+    "validate": true,
+    "smoke_preset": "provider-validate"
+  },
+  "items": [
+    {
+      "name": "stripe-test-secret",
+      "recipe": "recipes/stripe-test-secret.issue.json",
+      "exposure_manifest": "recipes/stripe-test-secret.exposure.json"
+    }
+  ]
+}
+```
 
 ## Safety Rules
 
