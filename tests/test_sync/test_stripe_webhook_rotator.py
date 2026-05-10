@@ -108,9 +108,47 @@ def test_rotate_stripe_webhook_propagates_and_deletes_previous_without_returning
     assert "whsec_new_secret" not in repr(result)
     mock_propagate.assert_called_once()
     assert mock_propagate.call_args.args[2] == "whsec_new_secret"
+    assert mock_propagate.call_args.kwargs["allow_manual_cutover"] is True
     mock_delete.assert_called_once()
     assert result.deleted_previous_endpoint is not None
     assert result.deleted_previous_endpoint.deleted is True
+
+
+@patch("banto.sync.stripe_webhook_rotator.propagate_secret")
+@patch("banto.sync.stripe_webhook_rotator.delete_stripe_webhook_endpoint")
+@patch("banto.sync.stripe_webhook_rotator.create_stripe_webhook_endpoint")
+@patch("banto.sync.stripe_webhook_rotator.KeychainStore")
+def test_rotate_stripe_webhook_cleans_created_endpoint_when_propagation_raises(
+    mock_kc_cls,
+    mock_create,
+    mock_delete,
+    mock_propagate,
+    stripe_config,
+):
+    config, _ = stripe_config
+    mock_kc_cls.return_value.get.return_value = "sk_test_source"
+    mock_create.return_value = CreatedStripeWebhookEndpoint(
+        endpoint_id="we_new",
+        signing_secret="whsec_new_secret",
+    )
+    mock_propagate.side_effect = ValueError("manual cutover")
+    mock_delete.return_value = DeletedStripeWebhookEndpoint(endpoint_id="we_new", deleted=True)
+
+    result = rotate_stripe_webhook_endpoint(
+        config,
+        "stripe-test-webhook",
+        source_secret_name="stripe-test-secret",
+        url="https://example.com/api/stripe/webhook",
+        enabled_events=("checkout.session.completed",),
+    )
+
+    assert result.ok is False
+    assert result.propagation is None
+    assert result.cleanup_of_created_endpoint is not None
+    assert result.cleanup_of_created_endpoint.deleted is True
+    assert result.error is not None
+    assert "ValueError" in result.error
+    mock_delete.assert_called_once_with("we_new", api_key="sk_test_source")
 
 
 @patch("banto.sync.cli.rotate_stripe_webhook_endpoint")

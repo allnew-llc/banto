@@ -195,10 +195,12 @@ def propagate_secret(
     do_validate: bool = False,
     smoke_command: str | None = None,
     smoke_preset: str | None = None,
+    allow_manual_cutover: bool = False,
 ) -> PropagationResult:
     """Store a replacement value, sync it to targets, and optionally validate/smoke-test."""
     plan = build_propagation_plan(config, secret_name)
-    validate_propagation_plan(plan)
+    if not (allow_manual_cutover and plan.rotation_class == "manual_cutover"):
+        validate_propagation_plan(plan)
 
     if smoke_command and smoke_preset:
         return PropagationResult(
