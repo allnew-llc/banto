@@ -158,6 +158,28 @@ def _ctypes_get(service: str, account: str) -> str | None:
     return password
 
 
+def _ctypes_exists(service: str, account: str) -> bool:
+    """Check for a generic password via Security framework without reading it."""
+    if _SECURITY_LIB is None:
+        return False
+    svc = service.encode("utf-8")
+    acct = account.encode("utf-8")
+    item_ref = ctypes.c_void_p()
+
+    status = _SECURITY_LIB.SecKeychainFindGenericPassword(
+        None,
+        len(svc), svc,
+        len(acct), acct,
+        None, None,
+        ctypes.byref(item_ref),
+    )
+    if status != 0:
+        return False
+    if item_ref:
+        _SECURITY_LIB.CFRelease(item_ref)
+    return True
+
+
 class KeychainStore:
     """macOS Keychain wrapper for API key storage.
 

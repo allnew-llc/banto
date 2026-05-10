@@ -257,6 +257,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto sync vercel-inventory` | Read-only Vercel env inventory without values |
 | `banto sync push [name]` | Push secrets from Keychain to targets (`--validate` for pre-push check) |
 | `banto sync add <name>` | Add a new secret (`--env`, `--target platform:project`) |
+| `banto sync import-keychain <name>` | Import an existing Keychain item into the configured sync account without printing the value |
 | `banto sync google-api-key <name>` | Issue a Google API key and propagate it safely |
 | `banto sync openai-service-account <name>` | Issue an OpenAI service account key and propagate it safely |
 | `banto sync openai-service-accounts` | List OpenAI service accounts without exposing key values |

@@ -9,6 +9,7 @@ automate them without exposing secret values to agents.
 |---|---|---|
 | Provider API | Provider exposes an API that returns a new one-time secret value | provider-specific `banto sync ...` command |
 | Browser recipe | Provider only exposes a console flow | `banto sync browser-issue ... --recipe ...` |
+| Existing Keychain import | A usable credential already exists under another local Keychain service | `banto sync import-keychain ... --from-service ...` |
 | Propagate only | Replacement value is obtained by another trusted local command | `banto sync propagate ... --from-cli ...` |
 | Manual cutover | Runtime behavior changes and needs rollout coordination | dedicated runbook |
 
@@ -40,9 +41,9 @@ automate them without exposing secret values to agents.
 | `stripe-live-webhook` | `STRIPE_WEBHOOK_SECRET` | Provider API + manual cutover | `banto sync stripe-webhook-endpoint stripe-live-webhook --source-secret stripe-live-secret ...` |
 | `quicktrust-ekyc-api-key` | `EKYC_API_KEY` | Browser recipe / propagate only | `banto sync browser-issue quicktrust-ekyc-api-key ...` |
 | `quicktrust-ekyc-webhook-secret` | `EKYC_WEBHOOK_SECRET` | Browser recipe / manual cutover | `banto sync browser-issue quicktrust-ekyc-webhook-secret ...` |
-| `claude-mcp-anthropic` | `ANTHROPIC_API_KEY` | Browser recipe / propagate only | Use the sync secret name that maps to account `claude-mcp-anthropic` |
-| `cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | Provider API | `banto sync cloudflare-account-token cloudflare-api-token ...` |
-| `claude-mcp-xai` | `XAI_API_KEY` | Provider API when management key exists | Use the sync secret name that maps to account `claude-mcp-xai`, then `banto sync xai-api-key ...` |
+| `claude-mcp-anthropic` | `ANTHROPIC_API_KEY` | Existing Keychain import / browser recipe | `banto sync import-keychain anthropic-api-key --from-service claude-mcp-anthropic` |
+| `cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | Existing Keychain import / Provider API | `banto sync import-keychain cloudflare-api-token --from-service cloudflare-api-token --from-account-empty` |
+| `claude-mcp-xai` | `XAI_API_KEY` | Existing Keychain import / Provider API when management key exists | `banto sync import-keychain xai-api-key --from-service claude-mcp-xai --push` |
 | `xai-management` | `XAI_MANAGEMENT_API_KEY` | Bootstrap credential | store once via trusted local flow, then use it to issue `XAI_API_KEY` |
 
 ## Cloudflare Account Token
