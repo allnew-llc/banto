@@ -124,6 +124,26 @@ class TestValidateModule:
         assert result.valid is True
 
     @patch("banto.sync.validate._http_get")
+    def test_stripe_valid(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.return_value = (200, '{}')
+        result = validate_key("stripe-live-secret", "sk-live-test")
+        assert result.valid is True
+        assert result.provider == "stripe"
+        mock_get.assert_called_once_with(
+            "https://api.stripe.com/v1/account",
+            {"Authorization": "Bearer sk-live-test"},
+        )
+
+    @patch("banto.sync.validate._http_get")
+    def test_stripe_invalid(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.return_value = (401, '{"error": "invalid"}')
+        result = validate_key("stripe", "sk-bad")
+        assert result.valid is False
+        assert result.status == "fail"
+
+    @patch("banto.sync.validate._http_get")
     def test_xai_valid(self, mock_get):
         from banto.sync.validate import validate_key
         mock_get.return_value = (200, '{"data": []}')
@@ -162,3 +182,4 @@ class TestValidateModule:
         assert "openai" in providers
         assert "anthropic" in providers
         assert "github" in providers
+        assert "stripe" in providers
