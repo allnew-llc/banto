@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..keychain import KeychainStore
+from ..keychain import KeychainStore, _ctypes_exists, _ctypes_get, default_keychain_account
 from .capabilities import (
     ROTATION_CLASS_ORDER,
     classify_config,
@@ -561,6 +561,178 @@ def cmd_sync_add(args: list[str]) -> None:
         print("Syncing to targets...")
         report = sync_secret(config, name)
         _print_report(report)
+
+
+def cmd_sync_import_keychain(args: list[str]) -> None:
+    """Import an existing exact Keychain service into the configured sync account."""
+    name = None
+    from_service = None
+    from_account = None
+    from_account_empty = False
+    do_push = "--push" in args
+    dry_run = "--dry-run" in args
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync import-keychain <name> --from-service <service> "
+                "[--from-account <account> | --from-account-empty] [--push] [--dry-run] [--json]"
+            )
+            return
+        if arg == "--from-service" and i + 1 < len(args):
+            from_service = args[i + 1]
+            i += 2
+            continue
+        if arg == "--from-account" and i + 1 < len(args):
+            from_account = args[i + 1]
+            i += 2
+            continue
+        if arg == "--from-account-empty":
+            from_account_empty = True
+            i += 1
+            continue
+        if arg in {"--config"}:
+            i += 2
+            continue
+        if arg in {"--push", "--dry-run", "--json"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not from_service:
+        print(
+            "Usage: banto sync import-keychain <name> --from-service <service> "
+            "[--from-account <account> | --from-account-empty] [--push] [--dry-run] [--json]"
+        )
+        sys.exit(1)
+    if from_account is not None and from_account_empty:
+        print("Error: Specify either --from-account or --from-account-empty, not both.")
+        sys.exit(1)
+
+    config, _ = _load_config(args)
+    entry = config.get_secret(name)
+    if entry is None:
+        print(f"Error: Secret '{name}' not found in sync config.")
+        sys.exit(1)
+
+    source_account = (
+        ""
+        if from_account_empty
+        else (from_account if from_account is not None else default_keychain_account())
+    )
+    kc = KeychainStore(service_prefix=config.keychain_service)
+    source_exists = _ctypes_exists(from_service, source_account)
+    dest_exists = kc.exists(entry.account)
+
+    if dry_run:
+        payload = {
+            "ok": source_exists,
+            "dry_run": True,
+            "name": entry.name,
+            "env_name": entry.env_name,
+            "from_service": from_service,
+            "from_account": source_account,
+            "to_service_prefix": config.keychain_service,
+            "to_account": entry.account,
+            "source_exists": source_exists,
+            "destination_exists": dest_exists,
+            "push": do_push,
+            "targets": [target.label for target in entry.targets],
+        }
+        if _is_json(args):
+            _json_out(payload)
+            if not source_exists:
+                sys.exit(1)
+            return
+        print(f"\nBANTO SYNC IMPORT KEYCHAIN — Dry run for {entry.name}\n")
+        print(f"  from_service:       {from_service}")
+        print(f"  from_account:       {source_account!r}")
+        print(f"  to_service_prefix:  {config.keychain_service}")
+        print(f"  to_account:         {entry.account}")
+        print(f"  source_exists:      {'yes' if source_exists else 'no'}")
+        print(f"  destination_exists: {'yes' if dest_exists else 'no'}")
+        print(f"  push_after_import:  {'yes' if do_push else 'no'}")
+        print(f"  targets:            {len(entry.targets)}")
+        for target in entry.targets:
+            print(f"    - {target.label}")
+        if not source_exists:
+            sys.exit(1)
+        return
+
+    value = _ctypes_get(from_service, source_account)
+    if value is None:
+        if _is_json(args):
+            _json_out({
+                "ok": False,
+                "name": entry.name,
+                "error": "source_not_found",
+                "from_service": from_service,
+                "from_account": source_account,
+            })
+        else:
+            print("Error: Source Keychain item not found.")
+        sys.exit(1)
+
+    if not kc.store(entry.account, value):
+        if _is_json(args):
+            _json_out({"ok": False, "name": entry.name, "error": "destination_store_failed"})
+        else:
+            print("Error: Failed to store imported value in banto sync Keychain.")
+        sys.exit(1)
+
+    version = None
+    history = HistoryStore()
+    recorded = history.record(entry.name, value, config.keychain_service)
+    if recorded is not None:
+        version = recorded.version
+
+    report = None
+    if do_push:
+        report = sync_secret(config, entry.name)
+
+    if _is_json(args):
+        _json_out({
+            "ok": report.fail_count == 0 if report is not None else True,
+            "name": entry.name,
+            "env_name": entry.env_name,
+            "from_service": from_service,
+            "from_account": source_account,
+            "to_service_prefix": config.keychain_service,
+            "to_account": entry.account,
+            "version": version,
+            "push": do_push,
+            "sync": None if report is None else {
+                "ok_count": report.ok_count,
+                "fail_count": report.fail_count,
+                "results": [
+                    {
+                        "secret_name": item.secret_name,
+                        "target_label": item.target_label,
+                        "success": item.success,
+                        "message": item.message,
+                    }
+                    for item in report.results
+                ],
+            },
+        })
+        if report is not None and report.fail_count:
+            sys.exit(1)
+        return
+
+    version_label = f" (now v{version})" if version is not None else ""
+    print(f"Imported '{entry.name}' into banto sync Keychain{version_label}.")
+    if report is not None:
+        print("Syncing to targets...")
+        _print_report(report)
+        if report.fail_count:
+            sys.exit(1)
 
 
 def cmd_sync_audit(args: list[str]) -> None:
@@ -3002,6 +3174,7 @@ SYNC_COMMANDS = {
     "vercel-inventory": cmd_sync_vercel_inventory,
     "push": cmd_sync_push,
     "add": cmd_sync_add,
+    "import-keychain": cmd_sync_import_keychain,
     "google-api-key": cmd_sync_google_api_key,
     "openai-service-account": cmd_sync_openai_service_account,
     "openai-service-accounts": cmd_sync_openai_service_accounts,
@@ -3039,6 +3212,7 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  validate            Test API keys against provider endpoints")
         print("  push [--validate]   Sync secrets to targets (--validate first)")
         print("  add <name> ...      Add a new secret")
+        print("  import-keychain <name> --from-service <service>")
         print("  google-api-key <name> --project-id <project>")
         print("  openai-service-account <name> --project-id <proj_...>")
         print("  openai-service-accounts --project-id <proj_...>")
