@@ -144,6 +144,14 @@ class TestValidateModule:
         assert result.status == "fail"
 
     @patch("banto.sync.validate._http_get")
+    def test_stripe_webhook_secret_is_format_only(self, mock_get):
+        from banto.sync.validate import validate_key
+        result = validate_key("stripe-test-webhook", "whsec_test")
+        assert result.valid is True
+        assert result.status == "unknown"
+        mock_get.assert_not_called()
+
+    @patch("banto.sync.validate._http_get")
     def test_xai_valid(self, mock_get):
         from banto.sync.validate import validate_key
         mock_get.return_value = (200, '{"data": []}')
