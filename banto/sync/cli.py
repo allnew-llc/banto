@@ -25,9 +25,18 @@ from .browser_issuer import (
     BrowserIssuePlan,
     BrowserIssueResult,
     BrowserIssuerError,
+    BrowserRetirementResult,
+    build_browser_retirement_plan,
     build_browser_issue_plan,
+    load_browser_retirement_recipe,
     issue_secret_with_browser,
     load_browser_issuer_recipe,
+    retire_key_with_browser,
+)
+from .browser_recorder import (
+    BrowserRecordingResult,
+    build_browser_recording_plan,
+    record_browser_recipe,
 )
 from .cloudflare_token_rotator import (
     DEFAULT_CREATOR_ACCOUNT as DEFAULT_CLOUDFLARE_CREATOR_ACCOUNT,
@@ -1036,6 +1045,47 @@ def _parse_positive_int(value: str, label: str) -> int:
     return parsed
 
 
+def _parse_key_value_options(args: list[str], flag: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        if args[i] == flag and i + 1 < len(args):
+            raw = args[i + 1]
+            if "=" not in raw:
+                print(f"Error: {flag} expects key=value.")
+                sys.exit(1)
+            key, value = raw.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                print(f"Error: {flag} expects non-empty key=value.")
+                sys.exit(1)
+            values[key] = value
+            i += 2
+            continue
+        i += 1
+    return values
+
+
+def _load_exposure_manifest(path: str | None) -> dict[str, str]:
+    if not path:
+        return {}
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Error: Failed to load exposure manifest: {exc}")
+        sys.exit(1)
+    if not isinstance(raw, dict) or raw.get("version") != 1:
+        print("Error: Exposure manifest must be a version 1 JSON object.")
+        sys.exit(1)
+    result: dict[str, str] = {}
+    for key in ("key_id", "key_label", "revoke_recipe"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            result[key] = value.strip()
+    return result
+
+
 def _propagation_json_payload(result) -> dict:
     return {
         "ok": result.ok,
@@ -1117,6 +1167,63 @@ def _browser_issue_json_payload(result: BrowserIssueResult) -> dict:
         "metadata": result.metadata,
         "propagation": None
         if result.propagation is None else _propagation_json_payload(result.propagation),
+        "retirement": None
+        if result.retirement is None else _browser_retirement_json_payload(result.retirement),
+        "error": result.error,
+    }
+
+
+def _browser_retirement_json_payload(result: BrowserRetirementResult) -> dict:
+    return {
+        "ok": result.ok,
+        "name": result.plan.propagation_plan.secret_name,
+        "env_name": result.plan.propagation_plan.env_name,
+        "provider": result.plan.propagation_plan.provider,
+        "recipe": {
+            "name": result.plan.recipe.name,
+            "provider": result.plan.recipe.provider,
+            "start_url": result.plan.recipe.start_url,
+            "steps": [
+                {
+                    "action": step.action,
+                    "selector": step.selector,
+                    "has_text_template": step.text is not None,
+                    "key": step.key,
+                    "has_value": step.value is not None,
+                    "has_url": step.url is not None,
+                    "state": step.state,
+                    "timeout_ms": step.timeout_ms,
+                    "message": step.message,
+                }
+                for step in result.plan.recipe.steps
+            ],
+            "success_selector": result.plan.recipe.success_selector,
+            "success_url": result.plan.recipe.success_url,
+        },
+        "key_id": result.plan.key_id,
+        "key_label": result.plan.key_label,
+        "profile_dir": str(result.plan.profile_dir),
+        "headless": result.plan.headless,
+        "retired": result.retired,
+        "message": result.message,
+        "error": result.error,
+    }
+
+
+def _browser_recording_json_payload(result: BrowserRecordingResult) -> dict:
+    return {
+        "ok": result.ok,
+        "provider": result.provider,
+        "start_url": result.start_url,
+        "recipe_path": str(result.recipe_path),
+        "script_path": None if result.script_path is None else str(result.script_path),
+        "exposure_manifest_path": None
+        if result.exposure_manifest_path is None else str(result.exposure_manifest_path),
+        "action_count": result.action_count,
+        "capture_selector": result.capture_selector,
+        "metadata_keys": list(result.metadata_keys),
+        "exposed_key_id_recorded": result.exposed_key_id_recorded,
+        "warnings": list(result.warnings),
         "error": result.error,
     }
 
@@ -1344,20 +1451,224 @@ def cmd_sync_propagate(args: list[str]) -> None:
         sys.exit(1)
 
 
-def cmd_sync_browser_issue(args: list[str]) -> None:
-    """Issue a provider credential through a local browser recipe."""
+def cmd_sync_browser_record(args: list[str]) -> None:
+    """Record browser actions into a reusable browser issuance recipe."""
     name = None
-    recipe_path = None
+    provider = None
+    start_url = None
+    output_path = None
     profile_dir = None
+    capture_selector = None
+    capture_source = "text"
+    capture_attribute = None
+    capture_regex = None
+    capture_min_length = 8
+    script_out = None
+    exposed_key_id_selector = None
+    exposed_key_label_selector = None
+    exposed_key_id = None
+    exposed_key_label = None
+    exposure_manifest_out = None
+    revoke_recipe_path = None
 
     i = 0
     while i < len(args):
         arg = args[i]
         if arg in {"-h", "--help"}:
             print(
-                "Usage: banto sync browser-issue <name> --recipe <recipe.json> "
-                "[--profile-dir <dir>] [--headless] [--validate] "
-                "[--smoke '<command>' | --smoke-preset <name>] [--dry-run] [--json]"
+                "Usage: banto sync browser-record <name> --start-url <url> "
+                "[--provider <provider>] --output <recipe.json> "
+                "[--capture-selector <selector> | --capture-from-last-click] "
+                "[--metadata key=selector] [--script-out <path>] "
+                "[--exposed-key-id <id> | --exposed-key-id-selector <selector>] "
+                "[--exposure-manifest-out <path> --revoke-recipe <recipe.json>] "
+                "[--dry-run] [--json]"
+            )
+            return
+        if arg == "--provider" and i + 1 < len(args):
+            provider = args[i + 1]
+            i += 2
+            continue
+        if arg == "--start-url" and i + 1 < len(args):
+            start_url = args[i + 1]
+            i += 2
+            continue
+        if arg == "--output" and i + 1 < len(args):
+            output_path = args[i + 1]
+            i += 2
+            continue
+        if arg == "--profile-dir" and i + 1 < len(args):
+            profile_dir = args[i + 1]
+            i += 2
+            continue
+        if arg == "--capture-selector" and i + 1 < len(args):
+            capture_selector = args[i + 1]
+            i += 2
+            continue
+        if arg == "--capture-source" and i + 1 < len(args):
+            capture_source = args[i + 1]
+            i += 2
+            continue
+        if arg == "--capture-attribute" and i + 1 < len(args):
+            capture_attribute = args[i + 1]
+            i += 2
+            continue
+        if arg == "--capture-regex" and i + 1 < len(args):
+            capture_regex = args[i + 1]
+            i += 2
+            continue
+        if arg == "--min-length" and i + 1 < len(args):
+            capture_min_length = _parse_positive_int(args[i + 1], "--min-length")
+            i += 2
+            continue
+        if arg == "--script-out" and i + 1 < len(args):
+            script_out = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposed-key-id-selector" and i + 1 < len(args):
+            exposed_key_id_selector = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposed-key-label-selector" and i + 1 < len(args):
+            exposed_key_label_selector = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposed-key-id" and i + 1 < len(args):
+            exposed_key_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposed-key-label" and i + 1 < len(args):
+            exposed_key_label = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposure-manifest-out" and i + 1 < len(args):
+            exposure_manifest_out = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-recipe" and i + 1 < len(args):
+            revoke_recipe_path = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--metadata", "--config"}:
+            i += 2
+            continue
+        if arg in {"--headless", "--capture-from-last-click", "--dry-run", "--json"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not start_url:
+        print(
+            "Usage: banto sync browser-record <name> --start-url <url> "
+            "[--provider <provider>] --output <recipe.json>"
+        )
+        sys.exit(1)
+
+    try:
+        config, _ = _load_config(args)
+        plan = build_browser_recording_plan(
+            config,
+            name,
+            start_url=start_url,
+            provider=provider,
+            output_path=output_path,
+            profile_dir=profile_dir,
+            headless="--headless" in args,
+            capture_selector=capture_selector,
+            capture_source=capture_source,
+            capture_attribute=capture_attribute,
+            capture_regex=capture_regex,
+            capture_min_length=capture_min_length,
+            capture_from_last_click="--capture-from-last-click" in args,
+            metadata_selectors=_parse_key_value_options(args, "--metadata"),
+            script_out=script_out,
+            exposed_key_id_selector=exposed_key_id_selector,
+            exposed_key_label_selector=exposed_key_label_selector,
+            exposed_key_id=exposed_key_id,
+            exposed_key_label=exposed_key_label,
+            exposure_manifest_out=exposure_manifest_out,
+            revoke_recipe_path=revoke_recipe_path,
+        )
+    except (BrowserIssuerError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if "--dry-run" in args:
+        payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.secret_name,
+            "provider": plan.provider,
+            "start_url": plan.start_url,
+            "recipe_path": str(plan.output_path),
+            "profile_dir": str(plan.profile_dir),
+            "capture_selector": plan.capture_selector,
+            "capture_from_last_click": plan.capture_from_last_click,
+            "metadata_keys": sorted(plan.metadata_selectors),
+            "script_path": None if plan.script_out is None else str(plan.script_out),
+            "exposure_manifest_path": None
+            if plan.exposure_manifest_out is None else str(plan.exposure_manifest_out),
+        }
+        if _is_json(args):
+            _json_out(payload)
+            return
+        print(f"\nBANTO SYNC BROWSER RECORD — Dry run for {plan.secret_name}\n")
+        print(f"  provider:      {plan.provider}")
+        print(f"  start_url:     {plan.start_url}")
+        print(f"  recipe_path:   {plan.output_path}")
+        print(f"  profile_dir:   {plan.profile_dir}")
+        print(f"  capture:       {plan.capture_selector or '(last click)'}")
+        print(f"  metadata:      {len(plan.metadata_selectors)}")
+        print("\n  No browser was launched and no recipe was written.")
+        return
+
+    result = record_browser_recipe(plan)
+    if _is_json(args):
+        _json_out(_browser_recording_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if not result.ok:
+        print(f"Error: {result.error}")
+        sys.exit(1)
+    print(f"Recorded browser recipe: {result.recipe_path}")
+    print(f"  actions:          {result.action_count}")
+    print(f"  capture_selector: {result.capture_selector}")
+    if result.script_path is not None:
+        print(f"  script:           {result.script_path}")
+    if result.exposure_manifest_path is not None:
+        print(f"  exposure_manifest:{result.exposure_manifest_path}")
+    for warning in result.warnings:
+        print(f"  Warning: {warning}")
+
+
+def cmd_sync_browser_revoke(args: list[str]) -> None:
+    """Retire a provider credential through a local browser recipe."""
+    name = None
+    recipe_path = None
+    profile_dir = None
+    key_id = None
+    key_label = None
+    manifest_path = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync browser-revoke <name> "
+                "--recipe <recipe.json> --key-id <provider-key-id> "
+                "[--key-label <label>] [--profile-dir <dir>] "
+                "[--headless] [--dry-run] [--json]"
             )
             return
         if arg == "--recipe" and i + 1 < len(args):
@@ -1368,10 +1679,154 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             profile_dir = args[i + 1]
             i += 2
             continue
+        if arg == "--key-id" and i + 1 < len(args):
+            key_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--key-label" and i + 1 < len(args):
+            key_label = args[i + 1]
+            i += 2
+            continue
+        if arg == "--exposure-manifest" and i + 1 < len(args):
+            manifest_path = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--config"}:
+            i += 2
+            continue
+        if arg in {"--headless", "--dry-run", "--json"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    manifest = _load_exposure_manifest(manifest_path)
+    recipe_path = recipe_path or manifest.get("revoke_recipe")
+    key_id = key_id or manifest.get("key_id")
+    key_label = key_label or manifest.get("key_label")
+
+    if not name or not recipe_path or not key_id:
+        print(
+            "Usage: banto sync browser-revoke <name> "
+            "--recipe <recipe.json> --key-id <provider-key-id>"
+        )
+        sys.exit(1)
+
+    try:
+        config, _ = _load_config(args)
+        recipe = load_browser_retirement_recipe(recipe_path)
+        plan = build_browser_retirement_plan(
+            config,
+            name,
+            recipe,
+            key_id=key_id,
+            key_label=key_label,
+            profile_dir=profile_dir,
+            headless="--headless" in args,
+        )
+    except (BrowserIssuerError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if "--dry-run" in args:
+        result = BrowserRetirementResult(plan=plan, retired=True, message="dry_run")
+        payload = _browser_retirement_json_payload(result)
+        payload.update({"ok": True, "dry_run": True})
+        if _is_json(args):
+            _json_out(payload)
+            return
+        print(f"\nBANTO SYNC BROWSER REVOKE — Dry run for {name}\n")
+        print(f"  recipe:      {plan.recipe.name}")
+        print(f"  provider:    {plan.propagation_plan.provider}")
+        print(f"  key_id:      {plan.key_id}")
+        print(f"  key_label:   {plan.key_label or '(none)'}")
+        print(f"  profile_dir: {plan.profile_dir}")
+        print("\n  No browser was launched and no credential was retired.")
+        return
+
+    result = retire_key_with_browser(
+        config,
+        name,
+        recipe,
+        key_id=key_id,
+        key_label=key_label,
+        profile_dir=profile_dir,
+        headless="--headless" in args,
+    )
+    if _is_json(args):
+        _json_out(_browser_retirement_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+    if result.ok:
+        print(f"Retired browser-managed credential: {result.plan.key_id}")
+    else:
+        print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_browser_issue(args: list[str]) -> None:
+    """Issue a provider credential through a local browser recipe."""
+    name = None
+    recipe_path = None
+    profile_dir = None
+    revoke_recipe_path = None
+    revoke_profile_dir = None
+    revoke_key_id = None
+    revoke_key_label = None
+    exposure_manifest_path = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync browser-issue <name> --recipe <recipe.json> "
+                "[--profile-dir <dir>] [--headless] [--validate] "
+                "[--smoke '<command>' | --smoke-preset <name>] "
+                "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
+                "[--exposure-manifest <path>] [--dry-run] [--json]"
+            )
+            return
+        if arg == "--recipe" and i + 1 < len(args):
+            recipe_path = args[i + 1]
+            i += 2
+            continue
+        if arg == "--profile-dir" and i + 1 < len(args):
+            profile_dir = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-recipe" and i + 1 < len(args):
+            revoke_recipe_path = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-profile-dir" and i + 1 < len(args):
+            revoke_profile_dir = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--revoke-key-id", "--revoke-exposed-key", "--revoke-previous-key"} and i + 1 < len(args):
+            revoke_key_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-key-label" and i + 1 < len(args):
+            revoke_key_label = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--exposure-manifest", "--revoke-exposed-manifest"} and i + 1 < len(args):
+            exposure_manifest_path = args[i + 1]
+            i += 2
+            continue
         if arg in {"--config", "--smoke", "--smoke-preset"}:
             i += 2
             continue
-        if arg in {"--json", "--dry-run", "--headless", "--validate"}:
+        if arg in {"--json", "--dry-run", "--headless", "--validate", "--revoke-headless"}:
             i += 1
             continue
         if arg.startswith("--"):
@@ -1385,7 +1840,9 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         print(
             "Usage: banto sync browser-issue <name> --recipe <recipe.json> "
             "[--profile-dir <dir>] [--headless] [--validate] "
-            "[--smoke '<command>' | --smoke-preset <name>] [--dry-run] [--json]"
+            "[--smoke '<command>' | --smoke-preset <name>] "
+            "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
+            "[--exposure-manifest <path>] [--dry-run] [--json]"
         )
         sys.exit(1)
 
@@ -1394,6 +1851,10 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
     do_validate = "--validate" in args
     smoke_command, smoke_preset = _parse_smoke_options(args)
     smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+    manifest = _load_exposure_manifest(exposure_manifest_path)
+    revoke_recipe_path = revoke_recipe_path or manifest.get("revoke_recipe")
+    revoke_key_id = revoke_key_id or manifest.get("key_id")
+    revoke_key_label = revoke_key_label or manifest.get("key_label")
 
     try:
         config, _ = _load_config(args)
@@ -1405,6 +1866,30 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             profile_dir=profile_dir,
             headless=headless,
         )
+        retire_recipe = (
+            load_browser_retirement_recipe(revoke_recipe_path)
+            if revoke_recipe_path else None
+        )
+        if revoke_key_id and retire_recipe is None:
+            raise BrowserIssuerError(
+                "Browser issue cannot revoke an exposed key without --revoke-recipe "
+                "or an exposure manifest containing revoke_recipe."
+            )
+        if retire_recipe is not None:
+            if not revoke_key_id:
+                raise BrowserIssuerError(
+                    "Browser issue retirement requires --revoke-key-id, "
+                    "--revoke-exposed-key, or an exposure manifest key_id."
+                )
+            build_browser_retirement_plan(
+                config,
+                name,
+                retire_recipe,
+                key_id=revoke_key_id,
+                key_label=revoke_key_label,
+                profile_dir=revoke_profile_dir,
+                headless="--revoke-headless" in args or headless,
+            )
     except (BrowserIssuerError, KeyError, ValueError) as exc:
         if _is_json(args):
             _json_out({"ok": False, "error": str(exc)})
@@ -1427,6 +1912,13 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
             "smoke": smoke_label,
             "smoke_preset": smoke_preset,
             "targets": list(plan.propagation_plan.targets),
+            "retirement": None if retire_recipe is None else {
+                "recipe": retire_recipe.name,
+                "key_id": revoke_key_id,
+                "key_label": revoke_key_label,
+                "profile_dir": revoke_profile_dir,
+                "headless": "--revoke-headless" in args or headless,
+            },
         })
         if _is_json(args):
             _json_out(payload)
@@ -1442,6 +1934,7 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         print(f"  headless:      {'yes' if headless else 'no'}")
         print(f"  validate:      {'yes' if do_validate else 'no'}")
         print(f"  smoke:         {smoke_label or '(none)'}")
+        print(f"  revoke_after:  {retire_recipe.name if retire_recipe is not None else '(none)'}")
         print(f"  steps:         {len(plan.recipe.steps)}")
         print(f"  targets:       {len(plan.propagation_plan.targets)}")
         for label in plan.propagation_plan.targets:
@@ -1458,6 +1951,11 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         do_validate=do_validate,
         smoke_command=smoke_command,
         smoke_preset=smoke_preset,
+        retire_recipe=retire_recipe,
+        retire_key_id=revoke_key_id,
+        retire_key_label=revoke_key_label,
+        retire_profile_dir=revoke_profile_dir,
+        retire_headless="--revoke-headless" in args or headless,
     )
 
     if _is_json(args):
@@ -1492,6 +1990,12 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
                 print(f"Smoke test passed: {result.propagation.smoke_check.command}")
             else:
                 print(f"Smoke test failed: {result.propagation.smoke_check.message}")
+
+    if result.retirement is not None:
+        if result.retirement.ok:
+            print(f"Retired exposed/previous credential: {result.retirement.plan.key_id}")
+        else:
+            print(f"Retirement failed: {result.retirement.error}")
 
     if not result.ok:
         if result.error:
@@ -3180,7 +3684,9 @@ SYNC_COMMANDS = {
     "openai-service-accounts": cmd_sync_openai_service_accounts,
     "openai-revoke-service-account": cmd_sync_openai_revoke_service_account,
     "xai-api-key": cmd_sync_xai_api_key,
+    "browser-record": cmd_sync_browser_record,
     "browser-issue": cmd_sync_browser_issue,
+    "browser-revoke": cmd_sync_browser_revoke,
     "cloudflare-account-token": cmd_sync_cloudflare_account_token,
     "stripe-webhook-endpoint": cmd_sync_stripe_webhook_endpoint,
     "propagate": cmd_sync_propagate,
@@ -3218,7 +3724,9 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  openai-service-accounts --project-id <proj_...>")
         print("  openai-revoke-service-account --project-id <proj_...> --service-account-id <svc_...>")
         print("  xai-api-key <name> --team-id <team_id>")
+        print("  browser-record <name> --start-url <url> --output <recipe.json>")
         print("  browser-issue <name> --recipe <recipe.json>")
+        print("  browser-revoke <name> --recipe <recipe.json> --key-id <id>")
         print("  cloudflare-account-token <name> --account-id <id> --policy-file <json>")
         print("  stripe-webhook-endpoint <name> --source-secret <secret> --url <https://...> --event <event>")
         print("  propagate <name>    Store + sync replacement value via common flow")
