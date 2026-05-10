@@ -141,6 +141,13 @@ def _validate_cloudflare(key: str) -> ValidationResult:
 
 def _validate_stripe(key: str) -> ValidationResult:
     """Stripe: GET /v1/account (read-only account metadata)."""
+    if key.startswith("whsec_"):
+        return ValidationResult(
+            "stripe",
+            True,
+            "unknown",
+            "Webhook signing secret format only; no remote validator",
+        )
     status, body = _http_get(
         "https://api.stripe.com/v1/account",
         {"Authorization": f"Bearer {key}"},
