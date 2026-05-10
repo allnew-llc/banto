@@ -300,14 +300,32 @@ def rotate_stripe_webhook_endpoint(
     )
     api_key, key_source = resolve_stripe_api_key(config, plan.source_secret_name)
     created = create_stripe_webhook_endpoint(plan, api_key=api_key)
-    propagation = propagate_secret(
-        config,
-        secret_name,
-        created.signing_secret,
-        do_validate=do_validate,
-        smoke_command=smoke_command,
-        smoke_preset=smoke_preset,
-    )
+    try:
+        propagation = propagate_secret(
+            config,
+            secret_name,
+            created.signing_secret,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+            allow_manual_cutover=True,
+        )
+    except Exception as exc:
+        cleanup = _safe_delete_stripe_webhook_endpoint(
+            created.endpoint_id,
+            api_key=api_key,
+        )
+        error = f"Propagation raised {type(exc).__name__} after creating Stripe webhook endpoint."
+        if not cleanup.deleted:
+            error += f" Cleanup failed: {cleanup.message}"
+        return StripeWebhookRotationResult(
+            plan=plan,
+            stripe_key_source=key_source,
+            created=created,
+            propagation=None,
+            cleanup_of_created_endpoint=cleanup,
+            error=error,
+        )
     if not propagation.ok:
         cleanup = _safe_delete_stripe_webhook_endpoint(
             created.endpoint_id,

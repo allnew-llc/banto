@@ -84,6 +84,30 @@ def test_propagate_secret_success(mock_kc_cls, mock_hist_cls, mock_sync, propaga
 @patch("banto.sync.propagation.sync_secret")
 @patch("banto.sync.propagation.HistoryStore")
 @patch("banto.sync.propagation.KeychainStore")
+def test_propagate_secret_allows_manual_cutover_when_explicit(
+    mock_kc_cls,
+    mock_hist_cls,
+    mock_sync,
+    propagate_config,
+):
+    config, _ = propagate_config
+    mock_kc_cls.return_value.store.return_value = True
+    mock_ver = MagicMock()
+    mock_ver.version = 9
+    mock_hist_cls.return_value.record.return_value = mock_ver
+    mock_sync.return_value = SyncReport()
+
+    result = propagate_secret(config, "hmac", "replacement", allow_manual_cutover=True)
+
+    assert result.ok is True
+    assert result.plan.rotation_class == "manual_cutover"
+    assert result.version == 9
+    mock_kc_cls.return_value.store.assert_called_once_with("hmac", "replacement")
+
+
+@patch("banto.sync.propagation.sync_secret")
+@patch("banto.sync.propagation.HistoryStore")
+@patch("banto.sync.propagation.KeychainStore")
 def test_propagate_secret_rejects_conflicting_smoke_options_before_side_effects(
     mock_kc_cls,
     mock_hist_cls,
