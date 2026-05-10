@@ -100,6 +100,7 @@ class BrowserIssuePlan:
     recipe: BrowserIssuerRecipe
     profile_dir: Path
     headless: bool
+    allow_manual_cutover: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,6 +270,21 @@ def default_browser_profile_dir(recipe: BrowserIssuerRecipe) -> Path:
     return Path.home() / ".local" / "state" / "banto" / "browser-profiles" / slug
 
 
+def _recipe_provider_matches(recipe_provider: str, plan: PropagationPlan) -> bool:
+    """Return whether a browser recipe can operate on a propagation plan.
+
+    QuickTrust API keys classify as `ekyc` and QuickTrust webhook secrets
+    classify as generic `webhook`; accepting `quicktrust` here lets one
+    provider-specific dashboard recipe cover both configured secret names.
+    """
+    if recipe_provider in {"*", plan.provider}:
+        return True
+    return (
+        recipe_provider == "quicktrust"
+        and plan.env_name in {"EKYC_API_KEY", "EKYC_WEBHOOK_SECRET"}
+    )
+
+
 def build_browser_issue_plan(
     config: SyncConfig,
     secret_name: str,
@@ -276,11 +292,13 @@ def build_browser_issue_plan(
     *,
     profile_dir: Path | str | None = None,
     headless: bool = False,
+    allow_manual_cutover: bool = False,
 ) -> BrowserIssuePlan:
     """Validate that a configured secret can use a browser issuance recipe."""
     plan = build_propagation_plan(config, secret_name)
-    validate_propagation_plan(plan)
-    if recipe.provider not in {"*", plan.provider}:
+    if not (allow_manual_cutover and plan.rotation_class == "manual_cutover"):
+        validate_propagation_plan(plan)
+    if not _recipe_provider_matches(recipe.provider, plan):
         raise BrowserIssuerError(
             f"Recipe provider '{recipe.provider}' does not match secret provider "
             f"'{plan.provider}'."
@@ -291,6 +309,7 @@ def build_browser_issue_plan(
         recipe=recipe,
         profile_dir=resolved_profile,
         headless=headless,
+        allow_manual_cutover=allow_manual_cutover,
     )
 
 
@@ -313,7 +332,7 @@ def build_browser_retirement_plan(
     """Validate that a configured secret can retire a browser-issued credential."""
     plan = build_propagation_plan(config, secret_name)
     _validate_retirement_identifier(key_id)
-    if recipe.provider not in {"*", plan.provider}:
+    if not _recipe_provider_matches(recipe.provider, plan):
         raise BrowserIssuerError(
             f"Retirement recipe provider '{recipe.provider}' does not match "
             f"secret provider '{plan.provider}'."
@@ -348,6 +367,7 @@ def issue_secret_with_browser(
     retire_key_label: str | None = None,
     retire_profile_dir: Path | str | None = None,
     retire_headless: bool | None = None,
+    allow_manual_cutover: bool = False,
 ) -> BrowserIssueResult:
     """Run a browser recipe, capture the new secret, and propagate it safely."""
     plan = build_browser_issue_plan(
@@ -356,6 +376,7 @@ def issue_secret_with_browser(
         recipe,
         profile_dir=profile_dir,
         headless=headless,
+        allow_manual_cutover=allow_manual_cutover,
     )
     try:
         captured = _run_playwright_recipe(plan)
@@ -366,6 +387,7 @@ def issue_secret_with_browser(
             do_validate=do_validate,
             smoke_command=smoke_command,
             smoke_preset=smoke_preset,
+            allow_manual_cutover=allow_manual_cutover,
         )
         error = None if propagation.ok else "Propagation failed after browser issuance."
         retirement = None

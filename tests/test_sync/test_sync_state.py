@@ -152,6 +152,40 @@ class TestValidateModule:
         mock_get.assert_not_called()
 
     @patch("banto.sync.validate._http_get")
+    def test_quicktrust_validates_ekyc_key_against_read_only_endpoint(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.return_value = (200, '{"data": []}')
+        result = validate_key("quicktrust-ekyc-api-key", "qt_test")
+        assert result.valid is True
+        assert result.status == "pass"
+        mock_get.assert_called_once_with(
+            "https://api.quicktrust.jp/v1/verification-sessions",
+            {"Authorization": "Bearer qt_test"},
+        )
+
+    @patch("banto.sync.validate._http_get")
+    def test_quicktrust_tries_staging_before_marking_invalid(self, mock_get):
+        from banto.sync.validate import validate_key
+        mock_get.side_effect = [
+            (401, '{"error": "Unauthorized"}'),
+            (200, '{"data": []}'),
+        ]
+        result = validate_key("ekyc", "qt_staging")
+        assert result.valid is True
+        assert result.status == "pass"
+        assert mock_get.call_args_list[1].args[0] == (
+            "https://api.staging.quicktrust.jp/v1/verification-sessions"
+        )
+
+    @patch("banto.sync.validate._http_get")
+    def test_quicktrust_webhook_secret_is_format_only(self, mock_get):
+        from banto.sync.validate import validate_key
+        result = validate_key("quicktrust-ekyc-webhook-secret", "shared-secret")
+        assert result.valid is True
+        assert result.status == "unknown"
+        mock_get.assert_not_called()
+
+    @patch("banto.sync.validate._http_get")
     def test_xai_valid(self, mock_get):
         from banto.sync.validate import validate_key
         mock_get.return_value = (200, '{"data": []}')

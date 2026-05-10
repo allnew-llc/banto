@@ -169,6 +169,43 @@ def _validate_stripe(key: str) -> ValidationResult:
     return ValidationResult("stripe", True, "unknown", f"HTTP {status}", status)
 
 
+def _validate_quicktrust(key: str) -> ValidationResult:
+    """QuickTrust: GET /v1/verification-sessions (read-only list endpoint).
+
+    QuickTrust documents 401 as invalid/missing API key and 403 as a valid key
+    without sufficient permission. Try both production and staging bases because
+    hontonotoko uses QuickTrust production for Vercel production and staging for
+    preview deployments.
+    """
+    saw_forbidden = False
+    saw_connection_failure = False
+    for base_url in ("https://api.quicktrust.jp", "https://api.staging.quicktrust.jp"):
+        status, body = _http_get(
+            f"{base_url}/v1/verification-sessions",
+            {"Authorization": f"Bearer {key}"},
+        )
+        if status == 200:
+            return ValidationResult("quicktrust", True, "pass", "Key valid")
+        if status == 403:
+            saw_forbidden = True
+        elif status == 0:
+            saw_connection_failure = True
+        elif status not in (401,):
+            return ValidationResult("quicktrust", True, "unknown", f"HTTP {status}", status)
+
+    if saw_forbidden:
+        return ValidationResult(
+            "quicktrust",
+            True,
+            "unknown",
+            "Key accepted but lacks verification-session list permission",
+            403,
+        )
+    if saw_connection_failure:
+        return ValidationResult("quicktrust", True, "unknown", "Connection failed", 0)
+    return ValidationResult("quicktrust", False, "fail", "Invalid API key", 401)
+
+
 def _validate_xai(key: str) -> ValidationResult:
     """xAI/Grok: GET /v1/models (OpenAI-compatible endpoint).
 
@@ -204,6 +241,8 @@ VALIDATORS: dict[str, callable] = {
     "cloudflare": _validate_cloudflare,
     "cloudflare-api": _validate_cloudflare,
     "stripe": _validate_stripe,
+    "ekyc": _validate_quicktrust,
+    "quicktrust": _validate_quicktrust,
     "xai": _validate_xai,
 }
 
@@ -215,6 +254,8 @@ SERVICE_PATTERNS: dict[str, str] = {
     "github": "github",
     "cloudflare": "cloudflare",
     "stripe": "stripe",
+    "ekyc": "quicktrust",
+    "quicktrust": "quicktrust",
     "xai": "xai",
 }
 
@@ -274,6 +315,16 @@ def validate_key(provider: str, value: str) -> ValidationResult:
 
     # Pattern match (for keychain service names like "claude-mcp-openai")
     provider_lower = provider.lower()
+    if (
+        "webhook" in provider_lower
+        and ("quicktrust" in provider_lower or "ekyc" in provider_lower)
+    ):
+        return ValidationResult(
+            "quicktrust",
+            True,
+            "unknown",
+            "Webhook signing secret format only; no remote validator",
+        )
     for pattern, name in SERVICE_PATTERNS.items():
         if pattern in provider_lower:
             return VALIDATORS[name](value)

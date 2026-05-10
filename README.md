@@ -245,7 +245,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 </details>
 
 <details>
-<summary><strong>Sync commands (25)</strong></summary>
+<summary><strong>Sync commands (26)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -267,6 +267,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto sync browser-record <name>` | Record a provider console flow into a reusable browser recipe without writing secret values |
 | `banto sync browser-issue <name>` | Issue a key through a local browser recipe, then store and sync without printing the value |
 | `banto sync browser-revoke <name>` | Revoke a browser-managed key by provider key id/label after replacement is live |
+| `banto sync quicktrust-credential <name>` | Issue a QuickTrust API key or webhook secret through a dashboard browser recipe |
 | `banto sync cloudflare-account-token <name>` | Issue a Cloudflare Account API token and propagate it without printing the value |
 | `banto sync stripe-webhook-endpoint <name>` | Create a Stripe webhook endpoint and propagate its signing secret |
 | `banto sync propagate <name>` | Store + sync a replacement value from a trusted local command |

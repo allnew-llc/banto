@@ -32,6 +32,7 @@ from banto.sync.cli import (
     cmd_sync_browser_issue,
     cmd_sync_browser_record,
     cmd_sync_browser_revoke,
+    cmd_sync_quicktrust_credential,
 )
 from banto.sync.config import SecretEntry, SyncConfig, Target
 from banto.sync.propagation import PropagationResult, build_propagation_plan
@@ -51,6 +52,18 @@ def browser_config(tmp_path: Path) -> tuple[SyncConfig, Path]:
         name="hmac",
         account="hmac",
         env_name="HMAC_SECRET",
+    ))
+    config.add_secret(SecretEntry(
+        name="quicktrust-ekyc-api-key",
+        account="quicktrust-ekyc-api-key",
+        env_name="EKYC_API_KEY",
+        targets=[Target(platform="local", file=str(tmp_path / ".dev.vars"))],
+    ))
+    config.add_secret(SecretEntry(
+        name="quicktrust-ekyc-webhook-secret",
+        account="quicktrust-ekyc-webhook-secret",
+        env_name="EKYC_WEBHOOK_SECRET",
+        targets=[Target(platform="local", file=str(tmp_path / ".dev.vars"))],
     ))
     config_path = tmp_path / "sync.json"
     config.save(config_path)
@@ -145,6 +158,34 @@ def test_build_browser_issue_plan_rejects_manual_cutover(browser_config):
 
     with pytest.raises(ValueError):
         build_browser_issue_plan(config, "hmac", recipe)
+
+
+def test_build_browser_issue_plan_accepts_quicktrust_provider_alias(browser_config):
+    config, _ = browser_config
+    recipe = browser_recipe_from_dict(_recipe_dict(provider="quicktrust"))
+
+    plan = build_browser_issue_plan(config, "quicktrust-ekyc-api-key", recipe)
+
+    assert plan.propagation_plan.provider == "ekyc"
+    assert plan.recipe.provider == "quicktrust"
+
+
+def test_build_browser_issue_plan_can_allow_manual_cutover_for_quicktrust_webhook(browser_config):
+    config, _ = browser_config
+    recipe = browser_recipe_from_dict(_recipe_dict(provider="quicktrust"))
+
+    with pytest.raises(ValueError):
+        build_browser_issue_plan(config, "quicktrust-ekyc-webhook-secret", recipe)
+
+    plan = build_browser_issue_plan(
+        config,
+        "quicktrust-ekyc-webhook-secret",
+        recipe,
+        allow_manual_cutover=True,
+    )
+
+    assert plan.allow_manual_cutover is True
+    assert plan.propagation_plan.rotation_class == "manual_cutover"
 
 
 @patch("banto.sync.browser_issuer.propagate_secret")
@@ -438,6 +479,30 @@ def test_cmd_sync_browser_revoke_dry_run(mock_retire, browser_config, tmp_path, 
     assert payload["dry_run"] is True
     assert payload["key_id"] == "tok_old_123"
     mock_retire.assert_not_called()
+
+
+def test_cmd_sync_quicktrust_credential_dry_run_uses_provider_defaults(
+    browser_config,
+    tmp_path,
+    capsys,
+):
+    _, config_path = browser_config
+    recipe_path = _recipe_file(tmp_path, provider="quicktrust")
+
+    cmd_sync_quicktrust_credential([
+        "quicktrust-ekyc-webhook-secret",
+        "--recipe", str(recipe_path),
+        "--dry-run",
+        "--json",
+        "--config", str(config_path),
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert payload["allow_manual_cutover"] is True
+    assert payload["provider"] == "webhook"
+    assert payload["profile_dir"].endswith("/browser-profiles/quicktrust")
 
 
 def test_browser_batch_dry_run_validates_issue_and_retirement(browser_config, tmp_path):
