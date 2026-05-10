@@ -21,6 +21,22 @@ from .capabilities import (
     classify_config,
     summarize_classifications,
 )
+from .browser_issuer import (
+    BrowserIssuePlan,
+    BrowserIssueResult,
+    BrowserIssuerError,
+    build_browser_issue_plan,
+    issue_secret_with_browser,
+    load_browser_issuer_recipe,
+)
+from .cloudflare_token_rotator import (
+    DEFAULT_CREATOR_ACCOUNT as DEFAULT_CLOUDFLARE_CREATOR_ACCOUNT,
+    DEFAULT_CREATOR_TOKEN_ENV as DEFAULT_CLOUDFLARE_CREATOR_TOKEN_ENV,
+    CloudflareTokenRotatorError,
+    build_cloudflare_account_token_plan,
+    load_cloudflare_token_policy,
+    rotate_cloudflare_account_token,
+)
 from .config import SyncConfig, SecretEntry, Target, DEFAULT_CONFIG_PATH
 from .history import HistoryStore
 from .google_rotator import (
@@ -52,6 +68,11 @@ from .xai_rotator import (
 from .incident_report import INCIDENT_LANE_ORDER, LANE_LABELS, build_incident_report
 from .propagation import build_propagation_plan, propagate_secret, validate_propagation_plan
 from .smoke_presets import list_smoke_presets, smoke_preset_exists
+from .stripe_webhook_rotator import (
+    StripeWebhookRotatorError,
+    build_stripe_webhook_endpoint_plan,
+    rotate_stripe_webhook_endpoint,
+)
 from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
 from .vercel_inventory import build_vercel_inventory_report, report_to_json
 
@@ -880,6 +901,117 @@ def _propagation_json_payload(result) -> dict:
     }
 
 
+def _browser_step_payload(plan: BrowserIssuePlan) -> list[dict[str, object]]:
+    return [
+        {
+            "action": step.action,
+            "selector": step.selector,
+            "has_text_template": step.text is not None,
+            "key": step.key,
+            "has_value": step.value is not None,
+            "has_url": step.url is not None,
+            "state": step.state,
+            "timeout_ms": step.timeout_ms,
+            "message": step.message,
+        }
+        for step in plan.recipe.steps
+    ]
+
+
+def _browser_issue_json_payload(result: BrowserIssueResult) -> dict:
+    return {
+        "ok": result.ok,
+        "name": result.plan.propagation_plan.secret_name,
+        "env_name": result.plan.propagation_plan.env_name,
+        "provider": result.plan.propagation_plan.provider,
+        "rotation_class": result.plan.propagation_plan.rotation_class,
+        "implementation_phase": result.plan.propagation_plan.implementation_phase,
+        "recipe": {
+            "name": result.plan.recipe.name,
+            "provider": result.plan.recipe.provider,
+            "start_url": result.plan.recipe.start_url,
+            "steps": _browser_step_payload(result.plan),
+            "capture": {
+                "selector": result.plan.recipe.capture.selector,
+                "source": result.plan.recipe.capture.source,
+                "attribute": result.plan.recipe.capture.attribute,
+                "has_regex": result.plan.recipe.capture.regex is not None,
+                "min_length": result.plan.recipe.capture.min_length,
+            },
+            "metadata_selectors": list(result.plan.recipe.metadata_selectors),
+        },
+        "profile_dir": str(result.plan.profile_dir),
+        "headless": result.plan.headless,
+        "metadata": result.metadata,
+        "propagation": None
+        if result.propagation is None else _propagation_json_payload(result.propagation),
+        "error": result.error,
+    }
+
+
+def _cloudflare_rotation_json_payload(result) -> dict:
+    return {
+        "ok": result.ok,
+        "name": result.plan.propagation_plan.secret_name,
+        "env_name": result.plan.propagation_plan.env_name,
+        "account_id": result.plan.account_id,
+        "token_name": result.plan.token_name,
+        "creator_token_source": result.creator_token_source,
+        "created": None if result.created is None else {
+            "token_id": result.created.token_id,
+            "token_name": result.created.token_name,
+            "expires_on": result.created.expires_on,
+        },
+        "propagation": None
+        if result.propagation is None else _propagation_json_payload(result.propagation),
+        "cleanup_of_created_token": None
+        if result.cleanup_of_created_token is None else {
+            "token_id": result.cleanup_of_created_token.token_id,
+            "deleted": result.cleanup_of_created_token.deleted,
+            "message": result.cleanup_of_created_token.message,
+        },
+        "revoked_previous_token": None
+        if result.revoked_previous_token is None else {
+            "token_id": result.revoked_previous_token.token_id,
+            "deleted": result.revoked_previous_token.deleted,
+            "message": result.revoked_previous_token.message,
+        },
+        "error": result.error,
+    }
+
+
+def _stripe_webhook_rotation_json_payload(result) -> dict:
+    return {
+        "ok": result.ok,
+        "name": result.plan.propagation_plan.secret_name,
+        "env_name": result.plan.propagation_plan.env_name,
+        "source_secret_name": result.plan.source_secret_name,
+        "url": result.plan.url,
+        "enabled_events": list(result.plan.enabled_events),
+        "stripe_key_source": result.stripe_key_source,
+        "created": None if result.created is None else {
+            "endpoint_id": result.created.endpoint_id,
+            "livemode": result.created.livemode,
+            "status": result.created.status,
+        },
+        "propagation": None
+        if result.propagation is None else _propagation_json_payload(result.propagation),
+        "cleanup_of_created_endpoint": None
+        if result.cleanup_of_created_endpoint is None else {
+            "endpoint_id": result.cleanup_of_created_endpoint.endpoint_id,
+            "deleted": result.cleanup_of_created_endpoint.deleted,
+            "message": result.cleanup_of_created_endpoint.message,
+        },
+        "deleted_previous_endpoint": None
+        if result.deleted_previous_endpoint is None else {
+            "endpoint_id": result.deleted_previous_endpoint.endpoint_id,
+            "deleted": result.deleted_previous_endpoint.deleted,
+            "message": result.deleted_previous_endpoint.message,
+        },
+        "error": result.error,
+    }
+
+
 def cmd_sync_rotate(args: list[str]) -> None:
     """Rotate a secret — update Keychain + re-sync all targets."""
     config, config_path = _load_config(args)
@@ -1037,6 +1169,537 @@ def cmd_sync_propagate(args: list[str]) -> None:
             print(f"Smoke test failed: {result.smoke_check.message}")
 
     if not result.ok:
+        sys.exit(1)
+
+
+def cmd_sync_browser_issue(args: list[str]) -> None:
+    """Issue a provider credential through a local browser recipe."""
+    name = None
+    recipe_path = None
+    profile_dir = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync browser-issue <name> --recipe <recipe.json> "
+                "[--profile-dir <dir>] [--headless] [--validate] "
+                "[--smoke '<command>' | --smoke-preset <name>] [--dry-run] [--json]"
+            )
+            return
+        if arg == "--recipe" and i + 1 < len(args):
+            recipe_path = args[i + 1]
+            i += 2
+            continue
+        if arg == "--profile-dir" and i + 1 < len(args):
+            profile_dir = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--config", "--smoke", "--smoke-preset"}:
+            i += 2
+            continue
+        if arg in {"--json", "--dry-run", "--headless", "--validate"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not recipe_path:
+        print(
+            "Usage: banto sync browser-issue <name> --recipe <recipe.json> "
+            "[--profile-dir <dir>] [--headless] [--validate] "
+            "[--smoke '<command>' | --smoke-preset <name>] [--dry-run] [--json]"
+        )
+        sys.exit(1)
+
+    dry_run = "--dry-run" in args
+    headless = "--headless" in args
+    do_validate = "--validate" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        config, _ = _load_config(args)
+        recipe = load_browser_issuer_recipe(recipe_path)
+        plan = build_browser_issue_plan(
+            config,
+            name,
+            recipe,
+            profile_dir=profile_dir,
+            headless=headless,
+        )
+    except (BrowserIssuerError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        result = BrowserIssueResult(
+            plan=plan,
+            propagation=None,
+            metadata={},
+            error=None,
+        )
+        payload = _browser_issue_json_payload(result)
+        payload.update({
+            "ok": True,
+            "dry_run": True,
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+        })
+        if _is_json(args):
+            _json_out(payload)
+            return
+
+        print(f"\nBANTO SYNC BROWSER ISSUE — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:      {plan.propagation_plan.env_name}")
+        print(f"  provider:      {plan.propagation_plan.provider}")
+        print(f"  class:         {plan.propagation_plan.rotation_class}")
+        print(f"  recipe:        {plan.recipe.name}")
+        print(f"  start_url:     {plan.recipe.start_url}")
+        print(f"  profile_dir:   {plan.profile_dir}")
+        print(f"  headless:      {'yes' if headless else 'no'}")
+        print(f"  validate:      {'yes' if do_validate else 'no'}")
+        print(f"  smoke:         {smoke_label or '(none)'}")
+        print(f"  steps:         {len(plan.recipe.steps)}")
+        print(f"  targets:       {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        print("\n  No browser was launched and no secret was captured.")
+        return
+
+    result = issue_secret_with_browser(
+        config,
+        name,
+        recipe,
+        profile_dir=profile_dir,
+        headless=headless,
+        do_validate=do_validate,
+        smoke_command=smoke_command,
+        smoke_preset=smoke_preset,
+    )
+
+    if _is_json(args):
+        _json_out(_browser_issue_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.metadata:
+        print("Captured non-secret metadata:")
+        for key, value in result.metadata.items():
+            print(f"  {key}: {value}")
+
+    if result.propagation is not None:
+        if result.propagation.validation is not None:
+            if result.propagation.validation.status == "pass":
+                print(f"Validation passed: {result.propagation.validation.message}")
+            elif result.propagation.validation.status == "unknown":
+                print(f"Validation unknown: {result.propagation.validation.message}")
+            else:
+                print(f"Validation failed: {result.propagation.validation.message}")
+        if result.propagation.version is not None:
+            print(
+                f"Propagated '{result.propagation.plan.secret_name}' "
+                f"(now v{result.propagation.version})"
+            )
+        if result.propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.propagation.sync_report)
+        if result.propagation.smoke_check is not None:
+            if result.propagation.smoke_check.success:
+                print(f"Smoke test passed: {result.propagation.smoke_check.command}")
+            else:
+                print(f"Smoke test failed: {result.propagation.smoke_check.message}")
+
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_cloudflare_account_token(args: list[str]) -> None:
+    """Create a Cloudflare Account API token and propagate it."""
+    name = None
+    account_id = None
+    policy_file = None
+    token_name = None
+    creator_token_env = DEFAULT_CLOUDFLARE_CREATOR_TOKEN_ENV
+    creator_account = DEFAULT_CLOUDFLARE_CREATOR_ACCOUNT
+    revoke_token_id = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync cloudflare-account-token <name> --account-id <id> "
+                "--policy-file <policy.json> [--token-name <name>] "
+                "[--creator-token-env CLOUDFLARE_TOKEN_CREATOR_API_TOKEN] "
+                "[--creator-account cloudflare-token-creator] "
+                "[--revoke-token <token_id>] [--validate] "
+                "[--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+            )
+            return
+        if arg == "--account-id" and i + 1 < len(args):
+            account_id = args[i + 1]
+            i += 2
+            continue
+        if arg == "--policy-file" and i + 1 < len(args):
+            policy_file = args[i + 1]
+            i += 2
+            continue
+        if arg == "--token-name" and i + 1 < len(args):
+            token_name = args[i + 1]
+            i += 2
+            continue
+        if arg == "--creator-token-env" and i + 1 < len(args):
+            creator_token_env = args[i + 1]
+            i += 2
+            continue
+        if arg == "--creator-account" and i + 1 < len(args):
+            creator_account = args[i + 1]
+            i += 2
+            continue
+        if arg == "--revoke-token" and i + 1 < len(args):
+            revoke_token_id = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--config", "--smoke", "--smoke-preset"}:
+            i += 2
+            continue
+        if arg in {"--json", "--dry-run", "--validate"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not account_id or not policy_file:
+        print(
+            "Usage: banto sync cloudflare-account-token <name> --account-id <id> "
+            "--policy-file <policy.json> [--token-name <name>] "
+            "[--creator-token-env CLOUDFLARE_TOKEN_CREATOR_API_TOKEN] "
+            "[--creator-account cloudflare-token-creator] "
+            "[--revoke-token <token_id>] [--validate] "
+            "[--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    dry_run = "--dry-run" in args
+    do_validate = "--validate" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        config, _ = _load_config(args)
+        payload = load_cloudflare_token_policy(policy_file)
+        plan = build_cloudflare_account_token_plan(
+            config,
+            name,
+            account_id,
+            payload,
+            token_name=token_name,
+        )
+    except (CloudflareTokenRotatorError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        dry_payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.propagation_plan.secret_name,
+            "env_name": plan.propagation_plan.env_name,
+            "provider": plan.propagation_plan.provider,
+            "rotation_class": plan.propagation_plan.rotation_class,
+            "account_id": plan.account_id,
+            "token_name": plan.token_name,
+            "policy_count": len(plan.payload.get("policies", [])),
+            "creator_resolution_order": [
+                f"env:{creator_token_env}",
+                f"keychain:{config.keychain_service}:{creator_account}",
+            ],
+            "revoke_token_id": revoke_token_id,
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+        }
+        if _is_json(args):
+            _json_out(dry_payload)
+            return
+        print(f"\nBANTO SYNC CLOUDFLARE ACCOUNT TOKEN — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:      {plan.propagation_plan.env_name}")
+        print(f"  account_id:    {plan.account_id}")
+        print(f"  token_name:    {plan.token_name}")
+        print(f"  policies:      {len(plan.payload.get('policies', []))}")
+        print(f"  validate:      {'yes' if do_validate else 'no'}")
+        print(f"  smoke:         {smoke_label or '(none)'}")
+        print("  creator_resolution:")
+        print(f"    - env:{creator_token_env}")
+        print(f"    - keychain:{config.keychain_service}:{creator_account}")
+        print(f"  revoke_token:  {revoke_token_id or '(none)'}")
+        print(f"  targets:       {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        return
+
+    try:
+        result = rotate_cloudflare_account_token(
+            config,
+            name,
+            account_id,
+            payload,
+            token_name=token_name,
+            creator_token_env=creator_token_env,
+            creator_account=creator_account,
+            revoke_token_id=revoke_token_id,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+        )
+    except CloudflareTokenRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out(_cloudflare_rotation_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.created is not None:
+        print(f"Created Cloudflare token {result.created.token_id or '(no id)'} ({result.created.token_name})")
+    if result.propagation is not None:
+        if result.propagation.version is not None:
+            print(f"Propagated '{result.propagation.plan.secret_name}' (now v{result.propagation.version})")
+        if result.propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.propagation.sync_report)
+    if result.cleanup_of_created_token is not None:
+        cleanup = result.cleanup_of_created_token
+        if cleanup.deleted:
+            print(f"Cleaned up created Cloudflare token: {cleanup.token_id}")
+        else:
+            print(f"Cleanup failed: {cleanup.message}")
+    if result.revoked_previous_token is not None:
+        revoked = result.revoked_previous_token
+        if revoked.deleted:
+            print(f"Revoked previous Cloudflare token: {revoked.token_id}")
+        else:
+            print(f"Previous Cloudflare token revoke failed: {revoked.message}")
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
+        sys.exit(1)
+
+
+def cmd_sync_stripe_webhook_endpoint(args: list[str]) -> None:
+    """Create a Stripe webhook endpoint and propagate its signing secret."""
+    name = None
+    source_secret = None
+    url = None
+    events: list[str] = []
+    description = None
+    api_version = None
+    connect = False
+    delete_previous_endpoint_id = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            print(
+                "Usage: banto sync stripe-webhook-endpoint <name> "
+                "--source-secret <stripe-secret-name> --url <https://...> "
+                "--event <event> [--event <event> ...] [--description <text>] "
+                "[--api-version <version>] [--connect] "
+                "[--delete-previous-endpoint <endpoint_id>] "
+                "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+            )
+            return
+        if arg == "--source-secret" and i + 1 < len(args):
+            source_secret = args[i + 1]
+            i += 2
+            continue
+        if arg == "--url" and i + 1 < len(args):
+            url = args[i + 1]
+            i += 2
+            continue
+        if arg == "--event" and i + 1 < len(args):
+            events.append(args[i + 1])
+            i += 2
+            continue
+        if arg == "--description" and i + 1 < len(args):
+            description = args[i + 1]
+            i += 2
+            continue
+        if arg == "--api-version" and i + 1 < len(args):
+            api_version = args[i + 1]
+            i += 2
+            continue
+        if arg == "--connect":
+            connect = True
+            i += 1
+            continue
+        if arg == "--delete-previous-endpoint" and i + 1 < len(args):
+            delete_previous_endpoint_id = args[i + 1]
+            i += 2
+            continue
+        if arg in {"--config", "--smoke", "--smoke-preset"}:
+            i += 2
+            continue
+        if arg in {"--json", "--dry-run", "--validate"}:
+            i += 1
+            continue
+        if arg.startswith("--"):
+            i += 1
+            continue
+        if name is None:
+            name = arg
+        i += 1
+
+    if not name or not source_secret or not url or not events:
+        print(
+            "Usage: banto sync stripe-webhook-endpoint <name> "
+            "--source-secret <stripe-secret-name> --url <https://...> "
+            "--event <event> [--event <event> ...] [--description <text>] "
+            "[--api-version <version>] [--connect] "
+            "[--delete-previous-endpoint <endpoint_id>] "
+            "[--validate] [--smoke '<command>' | --smoke-preset <name>] [--dry-run]"
+        )
+        sys.exit(1)
+
+    dry_run = "--dry-run" in args
+    do_validate = "--validate" in args
+    smoke_command, smoke_preset = _parse_smoke_options(args)
+    smoke_label = _format_smoke_label(smoke_command, smoke_preset)
+
+    try:
+        config, _ = _load_config(args)
+        plan = build_stripe_webhook_endpoint_plan(
+            config,
+            name,
+            source_secret_name=source_secret,
+            url=url,
+            enabled_events=tuple(events),
+            description=description,
+            api_version=api_version,
+            connect=connect,
+        )
+    except (StripeWebhookRotatorError, KeyError, ValueError) as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        dry_payload = {
+            "ok": True,
+            "dry_run": True,
+            "name": plan.propagation_plan.secret_name,
+            "env_name": plan.propagation_plan.env_name,
+            "source_secret_name": plan.source_secret_name,
+            "url": plan.url,
+            "enabled_events": list(plan.enabled_events),
+            "connect": plan.connect,
+            "delete_previous_endpoint_id": delete_previous_endpoint_id,
+            "validate": do_validate,
+            "smoke": smoke_label,
+            "smoke_preset": smoke_preset,
+            "targets": list(plan.propagation_plan.targets),
+            "manual_cutover": True,
+        }
+        if _is_json(args):
+            _json_out(dry_payload)
+            return
+        print(f"\nBANTO SYNC STRIPE WEBHOOK ENDPOINT — Dry run for {plan.propagation_plan.secret_name}\n")
+        print(f"  env_name:       {plan.propagation_plan.env_name}")
+        print(f"  source_secret:  {plan.source_secret_name}")
+        print(f"  url:            {plan.url}")
+        print(f"  events:         {', '.join(plan.enabled_events)}")
+        print(f"  connect:        {'yes' if plan.connect else 'no'}")
+        print(f"  delete_previous:{delete_previous_endpoint_id or '(none)'}")
+        print(f"  validate:       {'yes' if do_validate else 'no'}")
+        print(f"  smoke:          {smoke_label or '(none)'}")
+        print(f"  targets:        {len(plan.propagation_plan.targets)}")
+        for label in plan.propagation_plan.targets:
+            print(f"    - {label}")
+        print("\n  manual_cutover: yes")
+        print("  This creates a new webhook endpoint; runtime cutover must be coordinated.")
+        return
+
+    try:
+        result = rotate_stripe_webhook_endpoint(
+            config,
+            name,
+            source_secret_name=source_secret,
+            url=url,
+            enabled_events=tuple(events),
+            description=description,
+            api_version=api_version,
+            connect=connect,
+            delete_previous_endpoint_id=delete_previous_endpoint_id,
+            do_validate=do_validate,
+            smoke_command=smoke_command,
+            smoke_preset=smoke_preset,
+        )
+    except StripeWebhookRotatorError as exc:
+        if _is_json(args):
+            _json_out({"ok": False, "error": str(exc)})
+        else:
+            print(f"Error: {exc}")
+        sys.exit(1)
+
+    if _is_json(args):
+        _json_out(_stripe_webhook_rotation_json_payload(result))
+        if not result.ok:
+            sys.exit(1)
+        return
+
+    if result.created is not None:
+        print(f"Created Stripe webhook endpoint {result.created.endpoint_id}")
+    if result.propagation is not None:
+        if result.propagation.version is not None:
+            print(f"Propagated '{result.propagation.plan.secret_name}' (now v{result.propagation.version})")
+        if result.propagation.sync_report is not None:
+            print("Syncing to all targets...")
+            _print_report(result.propagation.sync_report)
+    if result.cleanup_of_created_endpoint is not None:
+        cleanup = result.cleanup_of_created_endpoint
+        if cleanup.deleted:
+            print(f"Cleaned up created Stripe webhook endpoint: {cleanup.endpoint_id}")
+        else:
+            print(f"Cleanup failed: {cleanup.message}")
+    if result.deleted_previous_endpoint is not None:
+        deleted = result.deleted_previous_endpoint
+        if deleted.deleted:
+            print(f"Deleted previous Stripe webhook endpoint: {deleted.endpoint_id}")
+        else:
+            print(f"Previous Stripe webhook endpoint delete failed: {deleted.message}")
+    if not result.ok:
+        if result.error:
+            print(f"Error: {result.error}")
         sys.exit(1)
 
 
@@ -2344,6 +3007,9 @@ SYNC_COMMANDS = {
     "openai-service-accounts": cmd_sync_openai_service_accounts,
     "openai-revoke-service-account": cmd_sync_openai_revoke_service_account,
     "xai-api-key": cmd_sync_xai_api_key,
+    "browser-issue": cmd_sync_browser_issue,
+    "cloudflare-account-token": cmd_sync_cloudflare_account_token,
+    "stripe-webhook-endpoint": cmd_sync_stripe_webhook_endpoint,
     "propagate": cmd_sync_propagate,
     "rotate": cmd_sync_rotate,
     "audit": cmd_sync_audit,
@@ -2378,6 +3044,9 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  openai-service-accounts --project-id <proj_...>")
         print("  openai-revoke-service-account --project-id <proj_...> --service-account-id <svc_...>")
         print("  xai-api-key <name> --team-id <team_id>")
+        print("  browser-issue <name> --recipe <recipe.json>")
+        print("  cloudflare-account-token <name> --account-id <id> --policy-file <json>")
+        print("  stripe-webhook-endpoint <name> --source-secret <secret> --url <https://...> --event <event>")
         print("  propagate <name>    Store + sync replacement value via common flow")
         print("  rotate <name>       Rotate a secret (update + re-sync)")
         print("  audit [--max-age-days N]  Check drift + fingerprint + stale")

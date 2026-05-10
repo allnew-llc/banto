@@ -40,8 +40,12 @@ This document defines the rollout plan for incident-ready secret rotation in
   a separate management key and optional propagation checks before storage.
 - `GEMINI_API_KEY` remains `partial_auto` until project-level issuance is proven
   in this workspace.
-- provider secrets such as GitHub, Cloudflare, LINE, Stripe, Twilio, Zoom, and
-  Azure start as `propagate_only`.
+- provider secrets such as GitHub, LINE, Twilio, Zoom, and Azure start as
+  `propagate_only` until a provider-specific issuance adapter is added.
+- Cloudflare Account API tokens can use `banto sync cloudflare-account-token`
+  when a token-creator credential is available.
+- Stripe webhook signing secrets can use `banto sync stripe-webhook-endpoint`,
+  but remain `manual_cutover` because endpoint routing must be coordinated.
 - identifiers such as account IDs, tenant IDs, and publishable keys remain
   `inventory_only`.
 - `ENCRYPTION_KEY`, `HMAC_SECRET`, `CRON_SECRET`, and webhook verification
@@ -72,6 +76,40 @@ banto sync propagate <name> --dry-run
 `propagate` does not mint new provider credentials by itself. It standardizes
 the safe middle of the workflow: optional validation, Keychain update, target
 sync, and optional post-sync smoke command.
+
+For provider APIs that can issue one-time secret values without exposing them
+to the agent, use native issuance adapters:
+
+```bash
+banto sync cloudflare-account-token cloudflare-api-token \
+  --account-id <account_id> --policy-file cloudflare-policy.json \
+  --revoke-token <old_token_id> --dry-run
+
+banto sync stripe-webhook-endpoint stripe-test-webhook \
+  --source-secret stripe-test-secret \
+  --url https://example.com/api/stripe/webhook \
+  --event checkout.session.completed \
+  --delete-previous-endpoint <old_endpoint_id> \
+  --dry-run
+```
+
+Retirement flags are explicit. Omit them during staged cutovers, then run the
+same command with the previous credential or endpoint id when the new value is
+verified in production.
+
+For provider console flows that do not yet have a native API rotator, use the
+browser-assisted issuance runner:
+
+```bash
+banto sync browser-issue github --recipe recipes/github-token.json --dry-run
+banto sync browser-issue github --recipe recipes/github-token.json \
+  --validate --smoke-preset provider-validate
+```
+
+This runner executes a local Playwright recipe, captures the newly displayed
+one-time credential inside the local banto process, and immediately hands it to
+the same propagation primitives. The agent receives metadata only; the issued
+secret value is never printed, logged, or returned in JSON output.
 
 Built-in smoke presets:
 
@@ -178,5 +216,7 @@ Safety rules for this rotator:
 Next targets:
 
 1. add provider adapters on top of the shared propagation flow
-2. decide whether `GEMINI_API_KEY` can be promoted from `partial_auto` to `full_auto`
-3. design separate runbooks for `manual_cutover` secrets
+2. convert stable browser recipes into provider-native rotator adapters where
+   provider APIs become available
+3. decide whether `GEMINI_API_KEY` can be promoted from `partial_auto` to `full_auto`
+4. design separate runbooks for `manual_cutover` secrets
