@@ -14,6 +14,7 @@ from banto.sync.propagation import PropagationResult, build_propagation_plan
 from banto.sync.stripe_webhook_rotator import (
     CreatedStripeWebhookEndpoint,
     DeletedStripeWebhookEndpoint,
+    StripeWebhookRotatorError,
     build_stripe_webhook_endpoint_plan,
     create_stripe_webhook_endpoint_with_cli,
     rotate_stripe_webhook_endpoint,
@@ -102,6 +103,32 @@ def test_create_stripe_webhook_endpoint_with_cli_parses_prefixed_json(mock_run, 
     argv = mock_run.call_args.args[0]
     assert "--live" in argv
     assert "checkout.session.completed" in argv
+
+
+@patch("banto.sync.stripe_webhook_rotator.subprocess.run")
+def test_create_stripe_webhook_endpoint_with_cli_redacts_error_key_fragments(
+    mock_run,
+    stripe_config,
+):
+    config, _ = stripe_config
+    plan = build_stripe_webhook_endpoint_plan(
+        config,
+        "stripe-test-webhook",
+        source_secret_name="stripe-test-secret",
+        url="https://example.com/api/stripe/webhook",
+        enabled_events=("checkout.session.completed",),
+    )
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout='{"error":{"message":"Invalid API Key provided: rk_live_abc123XYZ"}}',
+    )
+
+    with pytest.raises(StripeWebhookRotatorError) as exc:
+        create_stripe_webhook_endpoint_with_cli(plan, live_mode=True)
+
+    message = str(exc.value)
+    assert "rk_live_[redacted]" in message
+    assert "abc123XYZ" not in message
 
 
 @patch("banto.sync.stripe_webhook_rotator.propagate_secret")

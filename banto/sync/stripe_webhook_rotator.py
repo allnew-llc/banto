@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -17,6 +18,7 @@ from .config import SyncConfig
 from .propagation import PropagationPlan, PropagationResult, build_propagation_plan, propagate_secret
 
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+STRIPE_SECRET_FRAGMENT_RE = re.compile(r"\b((?:sk|rk|pk)_(?:live|test)|whsec)_[A-Za-z0-9*_]+")
 
 
 class StripeWebhookRotatorError(RuntimeError):
@@ -186,11 +188,24 @@ def _stripe_error_message(body: str) -> str:
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        return body[:200]
+        return _redact_stripe_secret_fragments(body[:200])
     error = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(error, dict) and isinstance(error.get("message"), str):
-        return error["message"]
-    return body[:200]
+        return _redact_stripe_secret_fragments(error["message"])
+    return _redact_stripe_secret_fragments(body[:200])
+
+
+def _redact_stripe_secret_fragments(message: str) -> str:
+    return STRIPE_SECRET_FRAGMENT_RE.sub(r"\1_[redacted]", message)
+
+
+def _stripe_payload_error_message(payload: dict) -> str | None:
+    error = payload.get("error")
+    if isinstance(error, dict) and isinstance(error.get("message"), str):
+        return _redact_stripe_secret_fragments(error["message"])
+    if isinstance(error, str):
+        return _redact_stripe_secret_fragments(error)
+    return None
 
 
 def _parse_stripe_cli_json(raw: str, *, command: str) -> dict:
@@ -295,6 +310,9 @@ def create_stripe_webhook_endpoint_with_cli(
         argv.append("--live")
 
     response = _run_stripe_cli_json(argv, command="webhook_endpoints create", timeout=timeout)
+    error_message = _stripe_payload_error_message(response)
+    if error_message:
+        raise StripeWebhookRotatorError(f"Stripe CLI webhook create failed: {error_message}")
     endpoint_id = response.get("id")
     signing_secret = response.get("secret")
     if not isinstance(endpoint_id, str) or not endpoint_id:
@@ -347,6 +365,9 @@ def delete_stripe_webhook_endpoint_with_cli(
         argv.append("--live")
 
     response = _run_stripe_cli_json(argv, command="webhook_endpoints delete", timeout=timeout)
+    error_message = _stripe_payload_error_message(response)
+    if error_message:
+        raise StripeWebhookRotatorError(f"Stripe CLI webhook delete failed: {error_message}")
     response_id = response.get("id")
     deleted = response.get("deleted") is True
     return DeletedStripeWebhookEndpoint(
