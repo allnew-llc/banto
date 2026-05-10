@@ -245,15 +245,27 @@ banto budget --provider openai 30    # OpenAI $30/月
 </details>
 
 <details>
-<summary><strong>Syncコマンド (13)</strong></summary>
+<summary><strong>Syncコマンド (25)</strong></summary>
 
 | コマンド | 説明 |
 |---------|------|
 | `banto sync setup <plat:proj>` | プラットフォームに環境変数を問い合わせ + Keychainマッチング（`--dry-run`、`--guess`） |
 | `banto sync init` | デフォルトの `sync.json` を作成 |
 | `banto sync status` | 同期ステータスマトリクス（シークレット x ターゲット） |
+| `banto sync classify` | シークレットをローテーション戦略別に分類 |
+| `banto sync incident-report` | インシデント対応向けに優先度を整理 |
+| `banto sync vercel-inventory` | 値を読まずにVercel環境変数の棚卸しを実行 |
 | `banto sync push [name]` | Keychainからターゲットにシークレットをプッシュ（`--validate` でプッシュ前チェック） |
 | `banto sync add <name>` | 新規シークレットの追加（`--env`、`--target platform:project`） |
+| `banto sync google-api-key <name>` | Google APIキーを発行し、安全に伝播 |
+| `banto sync openai-service-account <name>` | OpenAI service account keyを発行し、安全に伝播 |
+| `banto sync openai-service-accounts` | キー値を出さずにOpenAI service accountを一覧 |
+| `banto sync openai-revoke-service-account` | OpenAI service accountを失効 |
+| `banto sync xai-api-key <name>` | management keyを使ってxAI runtime API keyを発行 |
+| `banto sync browser-issue <name>` | ローカルブラウザrecipeでキーを発行し、値を表示せずKeychainと同期先へ反映 |
+| `banto sync cloudflare-account-token <name>` | Cloudflare Account API tokenを発行し、値を表示せず伝播 |
+| `banto sync stripe-webhook-endpoint <name>` | Stripe webhook endpointを作成し、署名secretを伝播 |
+| `banto sync propagate <name>` | 信頼済みローカルコマンドの置換値を保存・同期 |
 | `banto sync rotate <name>` | シークレットの対話的ローテーション、または `--from-cli '<command>'` で自動化 |
 | `banto sync audit` | ドリフト検出: 存在確認、フィンガープリント、ファイル不一致、陳腐化（`--max-age-days N`） |
 | `banto sync validate` | プロバイダエンドポイントに対するキー検証（`--keychain`、`--dry-run`） |
