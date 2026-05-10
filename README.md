@@ -245,15 +245,27 @@ banto budget --provider openai 30    # $30/month for OpenAI
 </details>
 
 <details>
-<summary><strong>Sync commands (13)</strong></summary>
+<summary><strong>Sync commands (25)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
 | `banto sync setup <plat:proj>` | Query platform for env vars + match Keychain entries (`--dry-run`, `--guess`) |
 | `banto sync init` | Create default `sync.json` config |
 | `banto sync status` | Sync status matrix (secrets x targets) |
+| `banto sync classify` | Group secrets by rotation strategy |
+| `banto sync incident-report` | Prioritize secrets for incident response |
+| `banto sync vercel-inventory` | Read-only Vercel env inventory without values |
 | `banto sync push [name]` | Push secrets from Keychain to targets (`--validate` for pre-push check) |
 | `banto sync add <name>` | Add a new secret (`--env`, `--target platform:project`) |
+| `banto sync google-api-key <name>` | Issue a Google API key and propagate it safely |
+| `banto sync openai-service-account <name>` | Issue an OpenAI service account key and propagate it safely |
+| `banto sync openai-service-accounts` | List OpenAI service accounts without exposing key values |
+| `banto sync openai-revoke-service-account` | Revoke an OpenAI service account |
+| `banto sync xai-api-key <name>` | Issue an xAI runtime API key using a management key |
+| `banto sync browser-issue <name>` | Issue a key through a local browser recipe, then store and sync without printing the value |
+| `banto sync cloudflare-account-token <name>` | Issue a Cloudflare Account API token and propagate it without printing the value |
+| `banto sync stripe-webhook-endpoint <name>` | Create a Stripe webhook endpoint and propagate its signing secret |
+| `banto sync propagate <name>` | Store + sync a replacement value from a trusted local command |
 | `banto sync rotate <name>` | Rotate a secret interactively or via `--from-cli '<command>'` |
 | `banto sync audit` | Drift detection: existence, fingerprint, file mismatch, staleness (`--max-age-days N`) |
 | `banto sync validate` | Test keys against provider endpoints (`--keychain`, `--dry-run`) |
