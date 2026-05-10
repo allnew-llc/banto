@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "name": "requested-provider-console-keys",
+  "fail_fast": true,
+  "defaults": {
+    "headless": false,
+    "validate": true,
+    "smoke_preset": "provider-validate"
+  },
+  "items": [
+    {
+      "name": "stripe-test-secret",
+      "recipe": "../recipes/stripe-test-secret.issue.json",
+      "exposure_manifest": "../recipes/stripe-test-secret.exposure.json"
+    },
+    {
+      "name": "stripe-live-secret",
+      "recipe": "../recipes/stripe-live-secret.issue.json",
+      "exposure_manifest": "../recipes/stripe-live-secret.exposure.json"
+    },
+    {
+      "name": "providerb-ekyc-api-key",
+      "recipe": "../recipes/providerb-ekyc-api-key.issue.json",
+      "exposure_manifest": "../recipes/providerb-ekyc-api-key.exposure.json"
+    },
+    {
+      "name": "providerb-ekyc-webhook-secret",
+      "recipe": "../recipes/providerb-ekyc-webhook-secret.issue.json",
+      "exposure_manifest": "../recipes/providerb-ekyc-webhook-secret.exposure.json",
+      "validate": false,
+      "smoke_preset": null
+    },
+    {
+      "name": "anthropic-api-key",
+      "recipe": "../recipes/anthropic-api-key.issue.json",
+      "exposure_manifest": "../recipes/anthropic-api-key.exposure.json"
+    }
+  ]
+}
