@@ -139,6 +139,29 @@ def _validate_cloudflare(key: str) -> ValidationResult:
     return ValidationResult("cloudflare", True, "unknown", f"HTTP {status}", status)
 
 
+def _validate_stripe(key: str) -> ValidationResult:
+    """Stripe: GET /v1/account (read-only account metadata)."""
+    status, body = _http_get(
+        "https://api.stripe.com/v1/account",
+        {"Authorization": f"Bearer {key}"},
+    )
+    if status == 200:
+        return ValidationResult("stripe", True, "pass", "Key valid")
+    if status == 401:
+        return ValidationResult("stripe", False, "fail", "Invalid API key", status)
+    if status == 403:
+        return ValidationResult(
+            "stripe",
+            True,
+            "unknown",
+            "Key accepted but lacks account-read permission",
+            status,
+        )
+    if status == 0:
+        return ValidationResult("stripe", True, "unknown", "Connection failed", status)
+    return ValidationResult("stripe", True, "unknown", f"HTTP {status}", status)
+
+
 def _validate_xai(key: str) -> ValidationResult:
     """xAI/Grok: GET /v1/models (OpenAI-compatible endpoint).
 
@@ -173,6 +196,7 @@ VALIDATORS: dict[str, callable] = {
     "github": _validate_github,
     "cloudflare": _validate_cloudflare,
     "cloudflare-api": _validate_cloudflare,
+    "stripe": _validate_stripe,
     "xai": _validate_xai,
 }
 
@@ -183,6 +207,7 @@ SERVICE_PATTERNS: dict[str, str] = {
     "gemini": "gemini",
     "github": "github",
     "cloudflare": "cloudflare",
+    "stripe": "stripe",
     "xai": "xai",
 }
 
