@@ -38,6 +38,14 @@ def test_classify_secret_known_and_unknown_cases():
     webhook = classify_secret("stripe-webhook", "STRIPE_WEBHOOK_SECRET")
     assert webhook.rotation_class == "manual_cutover"
 
+    poipoi_hmac = classify_secret("poipoi-hmac", "BAAS_FACTORY_HMAC_SECRET")
+    assert poipoi_hmac.provider == "app"
+    assert poipoi_hmac.rotation_class == "propagate_only"
+
+    poipoi_security_flag = classify_secret("poipoi-https", "BAAS_FACTORY_REQUIRE_HTTPS")
+    assert poipoi_security_flag.provider == "app"
+    assert poipoi_security_flag.rotation_class == "propagate_only"
+
     unknown = classify_secret("mystery", "MYSTERY_INTERNAL_TOKEN")
     assert unknown.rotation_class == "review_required"
 
