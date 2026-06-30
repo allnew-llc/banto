@@ -331,6 +331,24 @@
       "notes": "Requires staged verifier support or coordinated token invalidation."
     },
     {
+      "rule_id": "poipoi_factory_hmac_secret",
+      "provider": "app",
+      "display_name": "POIPOI factory request-signing HMAC secret",
+      "env_patterns": ["BAAS_FACTORY_HMAC_SECRET"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Dedicated request-signing key for the POIPOI factory bridge; enforcement is controlled separately by BAAS_FACTORY_REQUIRE_HMAC."
+    },
+    {
+      "rule_id": "poipoi_factory_security_flags",
+      "provider": "app",
+      "display_name": "POIPOI factory security flags",
+      "env_patterns": ["BAAS_FACTORY_REQUIRE_HMAC", "BAAS_FACTORY_REQUIRE_HTTPS"],
+      "rotation_class": "propagate_only",
+      "implementation_phase": "phase_2",
+      "notes": "Runtime flags for the POIPOI factory bridge security posture; values are fixed deployment config, not credentials."
+    },
+    {
       "rule_id": "app_cron_secret",
       "provider": "app",
       "display_name": "Application cron secret",
