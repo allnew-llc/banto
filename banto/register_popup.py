@@ -147,6 +147,13 @@ PROVIDER_GUIDES: dict[str, dict[str, object]] = {
     },
 }
 
+ASC_REGISTER_ITEMS: tuple[tuple[str, str, str, str], ...] = (
+    ("asc-issuer-id", "ASC_ISSUER_ID", "Issuer ID", "App Store Connect issuer UUID"),
+    ("asc-key-name", "ASC_KEY_NAME", "Name", "Human-readable key name in App Store Connect"),
+    ("asc-key-id", "ASC_KEY_ID", "Key ID", "App Store Connect key identifier"),
+    ("asc-p8-path", "ASC_AUTH_KEY_PATH", ".p8 file path", "Local path to the downloaded AuthKey .p8 file"),
+)
+
 
 def _normalize_register_item(data: dict) -> dict[str, str]:
     """Validate a register payload without leaking the secret value."""
@@ -824,6 +831,285 @@ def _build_html(provider_hint: str | None = None) -> str:
 </html>"""
 
 
+def _build_asc_html() -> str:
+    """Build the dedicated App Store Connect credential registration form."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>banto - Store App Store Connect Credentials</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    background: #101014;
+    color: #f4f4f5;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 760px;
+    background: #1d1d25;
+    border: 1px solid #30303a;
+    border-radius: 16px;
+    padding: 34px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.36);
+  }
+  .eyebrow {
+    color: #93c5fd;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px;
+    line-height: 1.2;
+    margin-bottom: 10px;
+  }
+  .intro {
+    color: #cbd5e1;
+    line-height: 1.55;
+    margin-bottom: 24px;
+  }
+  .notice {
+    background: #111827;
+    border: 1px solid #374151;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 22px;
+    color: #d1d5db;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  label {
+    display: block;
+    font-size: 14px;
+    font-weight: 650;
+    color: #f8fafc;
+    margin-bottom: 8px;
+  }
+  .hint {
+    color: #94a3b8;
+    font-size: 12px;
+    margin-top: -3px;
+    margin-bottom: 8px;
+  }
+  input {
+    width: 100%;
+    min-height: 46px;
+    border-radius: 10px;
+    border: 1px solid #3f3f46;
+    background: #111118;
+    color: #f8fafc;
+    padding: 12px 14px;
+    font: inherit;
+    outline: none;
+  }
+  input:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
+  }
+  .field {
+    margin-bottom: 18px;
+  }
+  .actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 26px;
+  }
+  button {
+    appearance: none;
+    border: none;
+    border-radius: 10px;
+    background: #2563eb;
+    color: #fff;
+    min-height: 46px;
+    padding: 0 18px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: .58;
+    cursor: not-allowed;
+  }
+  .secondary {
+    color: #94a3b8;
+    font-size: 13px;
+  }
+  .result {
+    display: none;
+    margin-top: 20px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .result.success {
+    display: block;
+    border: 1px solid #14532d;
+    background: #052e16;
+    color: #dcfce7;
+  }
+  .result.error {
+    display: block;
+    border: 1px solid #7f1d1d;
+    background: #450a0a;
+    color: #fee2e2;
+  }
+  code {
+    color: #bfdbfe;
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="eyebrow">App Store Connect</div>
+    <h1>Store ASC credentials in Keychain</h1>
+    <p class="intro">
+      Enter the App Store Connect API key metadata once. banto stores the values
+      in macOS Keychain and does not print them back to the page or terminal.
+    </p>
+    <div class="notice">
+      Stored providers: <code>asc-issuer-id</code>, <code>asc-key-name</code>,
+      <code>asc-key-id</code>, and <code>asc-p8-path</code>.
+    </div>
+    <form id="asc-form" autocomplete="off">
+      <div class="field">
+        <label for="issuer-id">Issuer ID</label>
+        <div class="hint">UUID from App Store Connect Users and Access.</div>
+        <input id="issuer-id" name="issuer-id" type="text" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="key-name">Name</label>
+        <div class="hint">Human-readable key name shown in App Store Connect.</div>
+        <input id="key-name" name="key-name" type="text" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="key-id">Key ID</label>
+        <div class="hint">10-character key identifier for the downloaded API key.</div>
+        <input id="key-id" name="key-id" type="text" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="p8-path">.p8 file path</label>
+        <div class="hint">Example: ~/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8</div>
+        <input id="p8-path" name="p8-path" type="text" required autocomplete="off">
+      </div>
+      <div class="actions">
+        <button id="submit-btn" type="submit">Store ASC Credentials</button>
+        <span class="secondary">Values stay local in Keychain.</span>
+      </div>
+    </form>
+    <div id="result" class="result" role="status" aria-live="polite"></div>
+  </main>
+<script>
+(function() {
+  const form = document.getElementById("asc-form");
+  const button = document.getElementById("submit-btn");
+  const result = document.getElementById("result");
+  let csrfToken = "";
+
+  fetch("/api/csrf-token", { credentials: "same-origin" })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) { csrfToken = data.token || ""; })
+    .catch(function() { csrfToken = ""; });
+
+  function value(id) {
+    return document.getElementById(id).value.trim();
+  }
+
+  function showError(message) {
+    result.textContent = message;
+    result.className = "result error";
+  }
+
+  form.addEventListener("submit", async function(event) {
+    event.preventDefault();
+    result.textContent = "";
+    result.className = "result";
+
+    const issuerId = value("issuer-id");
+    const keyName = value("key-name");
+    const keyId = value("key-id");
+    const p8Path = value("p8-path");
+    if (!issuerId || !keyName || !keyId || !p8Path) {
+      showError("All fields are required.");
+      return;
+    }
+    if (!p8Path.endsWith(".p8")) {
+      showError("The .p8 file path must end with .p8.");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Storing...";
+    try {
+      const resp = await fetch("/register-many", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              provider: "asc-issuer-id",
+              env_name: "ASC_ISSUER_ID",
+              value: issuerId,
+              description: "App Store Connect issuer UUID"
+            },
+            {
+              provider: "asc-key-name",
+              env_name: "ASC_KEY_NAME",
+              value: keyName,
+              description: "App Store Connect key name"
+            },
+            {
+              provider: "asc-key-id",
+              env_name: "ASC_KEY_ID",
+              value: keyId,
+              description: "App Store Connect key identifier"
+            },
+            {
+              provider: "asc-p8-path",
+              env_name: "ASC_AUTH_KEY_PATH",
+              value: p8Path,
+              description: "App Store Connect AuthKey p8 file path"
+            }
+          ]
+        })
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        throw new Error(data.error || "Failed to store ASC credentials.");
+      }
+      form.style.display = "none";
+      result.innerHTML = "ASC credentials stored in Keychain. Stored providers: "
+        + "<code>asc-issuer-id</code>, <code>asc-key-name</code>, "
+        + "<code>asc-key-id</code>, <code>asc-p8-path</code>. "
+        + "You can close this tab.";
+      result.className = "result success";
+    } catch (err) {
+      showError(err.message || "Connection error. Is the server running?");
+      button.disabled = false;
+      button.textContent = "Store ASC Credentials";
+    }
+  });
+})();
+</script>
+</body>
+</html>"""
+
+
 class _RegisterHandler(BaseHTTPRequestHandler):
     """Single-use HTTP handler for the registration popup."""
 
@@ -1014,6 +1300,56 @@ def serve_register_popup(
 
     if blocking:
         # Run server until success or keyboard interrupt
+        server_thread = threading.Thread(
+            target=server.serve_forever, daemon=True
+        )
+        server_thread.start()
+        try:
+            done_event.wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.shutdown()
+            server_thread.join(timeout=2)
+    else:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    return url
+
+
+def serve_asc_register_popup(*, blocking: bool = False) -> str:
+    """Start the dedicated App Store Connect credential registration popup."""
+    html = _build_asc_html()
+    config = SyncConfig.load()
+    keychain = KeychainStore(service_prefix=config.keychain_service)
+    csrf_token = secrets.token_urlsafe(32)
+
+    class Handler(_RegisterHandler):
+        html_content = html
+
+    Handler.keychain = keychain
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+
+    Handler.csrf_token = csrf_token
+    Handler.server_port = port
+
+    url = f"http://127.0.0.1:{port}"
+
+    done_event = threading.Event()
+
+    def _shutdown() -> None:
+        import time
+        time.sleep(0.5)
+        done_event.set()
+        server.shutdown()
+
+    Handler.on_success = _shutdown
+
+    webbrowser.open(url)
+
+    if blocking:
         server_thread = threading.Thread(
             target=server.serve_forever, daemon=True
         )
