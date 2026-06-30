@@ -277,6 +277,42 @@ class TestImportKeychain:
         mock_kc.store.assert_called_once_with("openai", "legacy-secret-value")
         mock_sync.assert_called_once()
 
+    @patch("banto.sync.cli._ctypes_get")
+    @patch("banto.sync.cli._ctypes_exists", return_value=True)
+    @patch("banto.sync.cli.HistoryStore")
+    @patch("banto.sync.cli.KeychainStore")
+    def test_import_keychain_can_resolve_file_content(
+        self,
+        mock_kc_cls,
+        mock_hist_cls,
+        mock_exists,
+        mock_get,
+        sync_config,
+        tmp_path,
+        capsys,
+    ):
+        _, config_path = sync_config
+        p8_file = tmp_path / "AuthKey_ABC123DEFG.p8"
+        p8_content = "-----BEGIN PRIVATE KEY-----\nprivate-key-body\n-----END PRIVATE KEY-----\n"
+        p8_file.write_text(p8_content, encoding="utf-8")
+        mock_get.return_value = str(p8_file)
+        mock_kc = mock_kc_cls.return_value
+        mock_kc.exists.return_value = False
+        mock_kc.store.return_value = True
+        mock_hist_cls.return_value.record.return_value = MagicMock(version=6)
+
+        cmd_sync_import_keychain([
+            "openai",
+            "--from-service", "legacy-openai",
+            "--resolve-file-content",
+            "--config", str(config_path),
+        ])
+
+        out = capsys.readouterr().out
+        assert "Imported 'openai'" in out
+        assert "private-key-body" not in out
+        mock_kc.store.assert_called_once_with("openai", p8_content)
+
 
 class TestAuditMaxAge:
     @patch("banto.sync.cli.check_status")

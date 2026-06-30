@@ -585,6 +585,7 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
     from_account_empty = False
     do_push = "--push" in args
     dry_run = "--dry-run" in args
+    resolve_file_content = "--resolve-file-content" in args
 
     i = 0
     while i < len(args):
@@ -592,7 +593,8 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
         if arg in {"-h", "--help"}:
             print(
                 "Usage: banto sync import-keychain <name> --from-service <service> "
-                "[--from-account <account> | --from-account-empty] [--push] [--dry-run] [--json]"
+                "[--from-account <account> | --from-account-empty] [--resolve-file-content] "
+                "[--push] [--dry-run] [--json]"
             )
             return
         if arg == "--from-service" and i + 1 < len(args):
@@ -610,7 +612,7 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
         if arg in {"--config"}:
             i += 2
             continue
-        if arg in {"--push", "--dry-run", "--json"}:
+        if arg in {"--push", "--dry-run", "--json", "--resolve-file-content"}:
             i += 1
             continue
         if arg.startswith("--"):
@@ -623,7 +625,8 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
     if not name or not from_service:
         print(
             "Usage: banto sync import-keychain <name> --from-service <service> "
-            "[--from-account <account> | --from-account-empty] [--push] [--dry-run] [--json]"
+            "[--from-account <account> | --from-account-empty] [--resolve-file-content] "
+            "[--push] [--dry-run] [--json]"
         )
         sys.exit(1)
     if from_account is not None and from_account_empty:
@@ -657,6 +660,7 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
             "to_account": entry.account,
             "source_exists": source_exists,
             "destination_exists": dest_exists,
+            "resolve_file_content": resolve_file_content,
             "push": do_push,
             "targets": [target.label for target in entry.targets],
         }
@@ -672,6 +676,7 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
         print(f"  to_account:         {entry.account}")
         print(f"  source_exists:      {'yes' if source_exists else 'no'}")
         print(f"  destination_exists: {'yes' if dest_exists else 'no'}")
+        print(f"  resolve_file_content:{'yes' if resolve_file_content else 'no'}")
         print(f"  push_after_import:  {'yes' if do_push else 'no'}")
         print(f"  targets:            {len(entry.targets)}")
         for target in entry.targets:
@@ -693,6 +698,22 @@ def cmd_sync_import_keychain(args: list[str]) -> None:
         else:
             print("Error: Source Keychain item not found.")
         sys.exit(1)
+
+    if resolve_file_content:
+        try:
+            value = Path(value).expanduser().read_text(encoding="utf-8")
+        except OSError:
+            if _is_json(args):
+                _json_out({
+                    "ok": False,
+                    "name": entry.name,
+                    "error": "source_file_not_readable",
+                    "from_service": from_service,
+                    "from_account": source_account,
+                })
+            else:
+                print("Error: Source Keychain item is not a readable file path.")
+            sys.exit(1)
 
     if not kc.store(entry.account, value):
         if _is_json(args):
