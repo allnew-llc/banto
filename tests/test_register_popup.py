@@ -2,7 +2,13 @@
 
 import pytest
 
-from banto.register_popup import _build_html, _normalize_register_item, _safe_attr
+from banto.register_popup import (
+    ASC_REGISTER_ITEMS,
+    _build_asc_html,
+    _build_html,
+    _normalize_register_item,
+    _safe_attr,
+)
 
 
 # Codex-recommended XSS regression payloads
@@ -89,3 +95,18 @@ def test_custom_hint_sets_custom_field() -> None:
     html = _build_html(provider_hint="hmac_secret")
 
     assert 'data-hint="hmac_secret"' in html
+
+
+def test_asc_registration_ui_posts_expected_providers() -> None:
+    html = _build_asc_html()
+
+    assert "Store ASC Credentials" in html
+    assert "/register-many" in html
+    assert 'id="issuer-id"' in html
+    assert 'id="key-name"' in html
+    assert 'id="key-id"' in html
+    assert 'id="p8-path"' in html
+    for provider, env_name, label, _description in ASC_REGISTER_ITEMS:
+        assert f'provider: "{provider}"' in html
+        assert f'env_name: "{env_name}"' in html
+        assert label in html
