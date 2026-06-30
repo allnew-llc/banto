@@ -7,6 +7,7 @@ Commands:
     status              Show budget status
     store <provider>    Store an API key in Keychain
     register [provider] Open browser popup to store an API key
+    register-asc        Open App Store Connect credential registration popup
     list                List stored provider keys
     check <model> ...   Dry-run budget check for a model
     init                Copy default config to ~/.config/banto/
@@ -451,6 +452,15 @@ def cmd_register(args: list[str]) -> None:
     print("Done.")
 
 
+def cmd_register_asc(args: list[str]) -> None:
+    from .register_popup import serve_asc_register_popup
+
+    print("Opening browser for App Store Connect credential registration...")
+    url = serve_asc_register_popup(blocking=True)
+    print(f"Server was at: {url}")
+    print("Done.")
+
+
 def cmd_sync(args: list[str]) -> None:
     from .sync.cli import cmd_sync_dispatch
     cmd_sync_dispatch(args)
@@ -479,6 +489,8 @@ COMMANDS = {
     "profile": cmd_profile,
     "store": cmd_store,
     "register": cmd_register,
+    "register-asc": cmd_register_asc,
+    "asc-register": cmd_register_asc,
     "delete": cmd_delete,
     "list": cmd_list,
     "check": cmd_check,
