@@ -696,5 +696,71 @@ def main() -> None:
         sys.exit(1)
 
 
+# ── Sealed signing tools (Secure Enclave, ECDSA-P256) ────────────
+# The private key is generated inside the Secure Enclave and is NON-EXTRACTABLE.
+# banto never returns key material. Signing raises a Touch ID / passcode prompt per
+# call (user presence), so an autonomous agent cannot mint a signature silently —
+# this is the "external root of trust" property (e.g. for v5 TCB rotation receipts).
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_create_key(key_id: str) -> dict:
+    """Create a NON-EXTRACTABLE EC P-256 signing key in the Secure Enclave.
+
+    Over this (agent) surface the key ALWAYS requires user presence (Touch ID /
+    passcode) per signature — an agent must not be able to mint a silent-signing
+    key. A presence-free key (for operator self-tests only) is available solely via
+    the `banto sealed create-key --no-presence` CLI, not here. Returns the PUBLIC
+    key only; the private key never leaves the enclave.
+    """
+    from . import sealed_signer
+
+    info = sealed_signer.create_signing_key(key_id, require_user_presence=True)
+    return {"structuredContent": info, "content": f"Sealed key '{key_id}' created (P-256, Touch ID required per signature)."}
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_export_pubkey(key_id: str) -> dict:
+    """Return the PUBLIC key (X9.63 + x/y) of a sealed signing key — non-secret."""
+    from . import sealed_signer
+
+    info = sealed_signer.export_public_key(key_id)
+    return {"structuredContent": info, "content": f"Public key for '{key_id}' (curve {info['curve']})."}
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_sign(key_id: str, payload_hex: str) -> dict:
+    """Sign a hex-encoded payload with a sealed key (ECDSA-P256/SHA-256).
+
+    Triggers a Touch ID / passcode prompt (user presence) — the human at the machine
+    must approve. Returns a DER signature (hex). The private key never leaves the
+    enclave.
+    """
+    from . import sealed_signer
+
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return {"structuredContent": {"error": "payload_hex must be hex"}, "content": "payload_hex must be hex"}
+    der = sealed_signer.sign(key_id, payload)
+    return {"structuredContent": {"key_id": key_id, "signature_hex": der.hex(), "alg": "ecdsa-p256-sha256"},
+            "content": f"Signed with '{key_id}' (human-approved)."}
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_list() -> dict:
+    """List the key_ids of all sealed banto signing keys."""
+    from . import sealed_signer
+
+    keys = sealed_signer.list_signing_keys()
+    return {"structuredContent": {"keys": keys, "count": len(keys)}, "content": f"{len(keys)} sealed signing key(s)."}
+
+
+# NOTE: deletion is deliberately NOT exposed as an MCP tool. Deleting a reviewer key
+# and re-creating one under the same key_id is a trust-root substitution/downgrade
+# attack (a compromised agent could replace a trusted reviewer key). Deletion is
+# operator-only via `banto sealed delete <key_id>` in an interactive terminal.
+
+
 if __name__ == "__main__":
     main()
