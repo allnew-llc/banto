@@ -78,6 +78,8 @@ def _parse_der_sig(der: bytes) -> tuple[int, int]:
     i = 2
 
     def _int(idx: int) -> tuple[int, int]:
+        if idx + 2 > len(der):  # need at least the tag + length octets
+            raise ValueError("truncated DER INTEGER header")
         if der[idx] != 0x02:
             raise ValueError("expected DER INTEGER")
         length = der[idx + 1]
@@ -119,5 +121,7 @@ def verify(public_key, message: bytes, der_signature: bytes) -> bool:
         u2 = r * w % _N
         result = _add(_mul(u1, _G), _mul(u2, point))
         return result is not None and result[0] % _N == r
-    except (ValueError, TypeError, ZeroDivisionError):
+    except (ValueError, TypeError, ZeroDivisionError, IndexError):
+        # Malformed input must fail closed (return False), never raise — a verifier that
+        # raised on crafted DER would let a caller mistake "reject" for a crash/DoS.
         return False

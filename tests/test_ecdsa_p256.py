@@ -62,6 +62,16 @@ def test_non_minimal_der_rejected():
     assert ecdsa_p256.verify(pub, b"m", non_minimal) is False
 
 
+def test_crafted_der_does_not_raise():
+    # A DER whose first INTEGER consumes all remaining bytes leaves the second _int()
+    # reading past the buffer. verify() must fail closed (return False), never raise.
+    pub, _ = _pub_and_sig(b"m")
+    for bad_hex in ("3006020401020304", "30080206010203040506"):
+        assert ecdsa_p256.verify(pub, b"m", bytes.fromhex(bad_hex)) is False
+        with pytest.raises(ValueError):
+            ecdsa_p256._parse_der_sig(bytes.fromhex(bad_hex))
+
+
 def test_on_curve_rejects_out_of_range_coordinates():
     # (x, y) is on the curve, but (x + P, y) satisfies the curve equation mod P while
     # being an invalid point. The folded range check must reject it.
