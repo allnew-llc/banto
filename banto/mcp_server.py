@@ -704,17 +704,19 @@ def main() -> None:
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
-async def banto_sealed_create_key(key_id: str, require_user_presence: bool = True) -> dict:
+async def banto_sealed_create_key(key_id: str) -> dict:
     """Create a NON-EXTRACTABLE EC P-256 signing key in the Secure Enclave.
 
-    Requires an interactive login session (the human is present). Returns the PUBLIC
-    key only (for registration in a trust-roots file); the private key never leaves
-    the enclave and is never returned.
+    Over this (agent) surface the key ALWAYS requires user presence (Touch ID /
+    passcode) per signature — an agent must not be able to mint a silent-signing
+    key. A presence-free key (for operator self-tests only) is available solely via
+    the `banto sealed create-key --no-presence` CLI, not here. Returns the PUBLIC
+    key only; the private key never leaves the enclave.
     """
     from . import sealed_signer
 
-    info = sealed_signer.create_signing_key(key_id, require_user_presence=require_user_presence)
-    return {"structuredContent": info, "content": f"Sealed key '{key_id}' created (P-256, presence={require_user_presence})."}
+    info = sealed_signer.create_signing_key(key_id, require_user_presence=True)
+    return {"structuredContent": info, "content": f"Sealed key '{key_id}' created (P-256, Touch ID required per signature)."}
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
@@ -754,13 +756,10 @@ async def banto_sealed_list() -> dict:
     return {"structuredContent": {"keys": keys, "count": len(keys)}, "content": f"{len(keys)} sealed signing key(s)."}
 
 
-@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False})
-async def banto_sealed_delete(key_id: str) -> dict:
-    """Delete a sealed signing key from the enclave/keychain."""
-    from . import sealed_signer
-
-    ok = sealed_signer.delete_signing_key(key_id)
-    return {"structuredContent": {"key_id": key_id, "deleted": ok}, "content": ("Deleted" if ok else "Not found") + f": {key_id}."}
+# NOTE: deletion is deliberately NOT exposed as an MCP tool. Deleting a reviewer key
+# and re-creating one under the same key_id is a trust-root substitution/downgrade
+# attack (a compromised agent could replace a trusted reviewer key). Deletion is
+# operator-only via `banto sealed delete <key_id>` in an interactive terminal.
 
 
 if __name__ == "__main__":

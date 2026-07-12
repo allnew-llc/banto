@@ -60,3 +60,16 @@ def test_non_minimal_der_rejected():
     pub, _ = _pub_and_sig(b"m")
     non_minimal = b"\x30\x08\x02\x02\x00\x01\x02\x02\x00\x01"
     assert ecdsa_p256.verify(pub, b"m", non_minimal) is False
+
+
+def test_on_curve_rejects_out_of_range_coordinates():
+    # (x, y) is on the curve, but (x + P, y) satisfies the curve equation mod P while
+    # being an invalid point. The folded range check must reject it.
+    pub, der = _pub_and_sig(b"m")
+    x, y = ecdsa_p256.public_key_from_x963(pub)
+    assert ecdsa_p256._on_curve((x, y)) is True
+    assert ecdsa_p256._on_curve((x + ecdsa_p256._P, y)) is False
+    assert ecdsa_p256._on_curve((x, y + ecdsa_p256._P)) is False
+    assert ecdsa_p256._on_curve((-x, y)) is False
+    # verify() must fall through to False for such a point, not raise.
+    assert ecdsa_p256.verify((x + ecdsa_p256._P, y), b"m", der) is False
