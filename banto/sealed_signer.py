@@ -145,7 +145,10 @@ def _cfdata(data: bytes, pool: list) -> ctypes.c_void_p:
 
 def _cfnumber(value: int, pool: list) -> ctypes.c_void_p:
     holder = ctypes.c_int(value)
-    ref = ctypes.c_void_p(_CF.CFNumberCreate(None, _kCFNumberIntType, ctypes.byref(holder)))
+    ref = _CF.CFNumberCreate(None, _kCFNumberIntType, ctypes.byref(holder))
+    if not ref:  # guard: a NULL in the pool would make _drain call CFRelease(NULL) → abort
+        raise SealedSignerError("CFNumberCreate failed")
+    ref = ctypes.c_void_p(ref)
     pool.append(ref)
     return ref
 
@@ -176,15 +179,26 @@ def _drain(pool: list) -> None:
 
 
 def _cferror_text(err: ctypes.c_void_p) -> str:
+    """Render a CFErrorRef out-parameter to text and RELEASE it.
+
+    The Security "Create" APIs write a caller-owned CFError into their ``error``
+    out-param on failure (the Create Rule), so we own it and must release it. Every
+    call site passes ``err`` here purely to build a message and then discards it, so
+    this function consumes it: it releases both the copied description and ``err``
+    itself. Callers must not touch ``err`` afterwards.
+    """
     if not err:
         return "unknown error"
-    desc = _CF.CFErrorCopyDescription(err)
-    if not desc:
-        return "unknown error"
-    buf = ctypes.create_string_buffer(1024)
-    ok = _CF.CFStringGetCString(ctypes.c_void_p(desc), buf, 1024, 0x08000100)
-    _CF.CFRelease(ctypes.c_void_p(desc))
-    return buf.value.decode("utf-8", "replace") if ok else "unknown error"
+    try:
+        desc = _CF.CFErrorCopyDescription(err)
+        if not desc:
+            return "unknown error"
+        buf = ctypes.create_string_buffer(1024)
+        ok = _CF.CFStringGetCString(ctypes.c_void_p(desc), buf, 1024, 0x08000100)
+        _CF.CFRelease(ctypes.c_void_p(desc))
+        return buf.value.decode("utf-8", "replace") if ok else "unknown error"
+    finally:
+        _CF.CFRelease(err)
 
 
 def _cfdata_bytes(data_ref: ctypes.c_void_p) -> bytes:
