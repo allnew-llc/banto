@@ -471,6 +471,11 @@ def cmd_lease(args: list[str]) -> None:
     cmd_lease_dispatch(args)
 
 
+def cmd_sealed(args: list[str]) -> None:
+    from .sealed_cli import cmd_sealed_dispatch
+    cmd_sealed_dispatch(args)
+
+
 def cmd_chatgpt(args: list[str]) -> None:
     if not args or args[0] in ("-h", "--help"):
         print("banto chatgpt: Connect banto to ChatGPT\n")
@@ -497,6 +502,7 @@ COMMANDS = {
     "init": cmd_init,
     "sync": cmd_sync,
     "lease": cmd_lease,
+    "sealed": cmd_sealed,
     "chatgpt": cmd_chatgpt,
 }
 
@@ -517,6 +523,7 @@ def main() -> None:
         print("  init                Copy default config to ~/.config/banto/")
         print("  sync <cmd>          Multi-platform secret sync (33 platforms)")
         print("  lease <cmd>         Dynamic secrets with TTL and auto-revoke")
+        print("  sealed <cmd>        Secure Enclave sealed signing (non-extractable keys)")
         print("  chatgpt connect     Connect banto to ChatGPT (starts tunnel)")
         print()
         print("Budget examples:")
