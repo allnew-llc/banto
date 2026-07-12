@@ -8,9 +8,15 @@ leave the enclave, so no caller (human or agent) can copy it. banto only:
 - ``create_signing_key`` — generate a sealed EC P-256 key in the enclave;
 - ``export_public_key`` — return the PUBLIC key (non-secret);
 - ``sign`` — produce an ECDSA-P256/SHA-256 signature over a payload. When the key
-  requires user presence, macOS raises a Touch ID / passcode prompt per signature,
-  so an autonomous agent cannot sign silently — this is the "external root of
-  trust" property: the workspace-writing actor cannot mint a signature.
+  requires user presence, macOS raises a Touch ID / passcode prompt per signature.
+
+Threat model, stated honestly: a *user-presence* key (the only kind creatable over
+the MCP agent surface) forces a human approval per signature, so an autonomous
+agent cannot sign *silently* with it. Caveats: (1) presence is satisfiable by
+biometry OR the device passcode, so an actor with GUI control could still approve;
+(2) a presence-FREE key (creatable only via the `--no-presence` operator CLI, never
+over MCP) signs with no prompt. The private key is non-extractable in every case;
+the human gate is only as strong as the presence policy and who can drive the GUI.
 
 Uses the macOS Security framework via ctypes (same approach as ``keychain.py``);
 zero third-party dependencies. macOS + Apple Secure Enclave only.
@@ -113,27 +119,38 @@ def _symbol_addr(lib, name: str) -> ctypes.c_void_p:
     return ctypes.c_void_p(ctypes.addressof(ctypes.c_char.in_dll(lib, name)))
 
 
-def _cfstr(text: str) -> ctypes.c_void_p:
+# CF objects we CREATE are appended to a per-call ``pool`` and released together in
+# a finally (``_drain``). Constants (``_const``) and struct addresses (``_symbol_addr``)
+# are NOT pooled — releasing a constant would corrupt the framework. A CFDictionary
+# retains its keys/values, so releasing our own reference after the Security call is
+# correct (the dict keeps its own retain until the dict itself is released).
+
+def _cfstr(text: str, pool: list) -> ctypes.c_void_p:
     ref = _CF.CFStringCreateWithCString(None, text.encode("utf-8"), 0x08000100)  # kCFStringEncodingUTF8
     if not ref:
         raise SealedSignerError("CFStringCreateWithCString failed")
-    return ctypes.c_void_p(ref)
+    ref = ctypes.c_void_p(ref)
+    pool.append(ref)
+    return ref
 
 
-def _cfdata(data: bytes) -> ctypes.c_void_p:
+def _cfdata(data: bytes, pool: list) -> ctypes.c_void_p:
     ref = _CF.CFDataCreate(None, data, len(data))
     if not ref:
         raise SealedSignerError("CFDataCreate failed")
-    return ctypes.c_void_p(ref)
+    ref = ctypes.c_void_p(ref)
+    pool.append(ref)
+    return ref
 
 
-def _cfnumber(value: int) -> ctypes.c_void_p:
+def _cfnumber(value: int, pool: list) -> ctypes.c_void_p:
     holder = ctypes.c_int(value)
-    ref = _CF.CFNumberCreate(None, _kCFNumberIntType, ctypes.byref(holder))
-    return ctypes.c_void_p(ref)
+    ref = ctypes.c_void_p(_CF.CFNumberCreate(None, _kCFNumberIntType, ctypes.byref(holder)))
+    pool.append(ref)
+    return ref
 
 
-def _cfdict(pairs: list[tuple[ctypes.c_void_p, ctypes.c_void_p]]) -> ctypes.c_void_p:
+def _cfdict(pairs: list[tuple[ctypes.c_void_p, ctypes.c_void_p]], pool: list) -> ctypes.c_void_p:
     n = len(pairs)
     keys = (ctypes.c_void_p * n)(*[k for k, _ in pairs])
     vals = (ctypes.c_void_p * n)(*[v for _, v in pairs])
@@ -143,7 +160,19 @@ def _cfdict(pairs: list[tuple[ctypes.c_void_p, ctypes.c_void_p]]) -> ctypes.c_vo
     )
     if not ref:
         raise SealedSignerError("CFDictionaryCreate failed")
-    return ctypes.c_void_p(ref)
+    ref = ctypes.c_void_p(ref)
+    pool.append(ref)
+    return ref
+
+
+def _drain(pool: list) -> None:
+    """CFRelease every object we created for a call (leak-free; never touches constants)."""
+    while pool:
+        ref = pool.pop()
+        try:
+            _CF.CFRelease(ref)
+        except Exception:  # pragma: no cover - defensive
+            pass
 
 
 def _cferror_text(err: ctypes.c_void_p) -> str:
@@ -180,16 +209,19 @@ def _validate_key_id(key_id: str) -> None:
 
 def _copy_key_ref(key_id: str) -> ctypes.c_void_p:
     """Look up the sealed private key by application tag; caller CFReleases it."""
-    query = _cfdict([
-        (_const(_SEC, "kSecClass"), _const(_SEC, "kSecClassKey")),
-        (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id))),
-        (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
-        (_const(_SEC, "kSecReturnRef"), _const(_CF, "kCFBooleanTrue")),
-        (_const(_SEC, "kSecMatchLimit"), _const(_SEC, "kSecMatchLimitOne")),
-    ])
-    out = ctypes.c_void_p()
-    status = _SEC.SecItemCopyMatching(query, ctypes.byref(out))
-    _CF.CFRelease(query)
+    pool: list = []
+    try:
+        query = _cfdict([
+            (_const(_SEC, "kSecClass"), _const(_SEC, "kSecClassKey")),
+            (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id), pool)),
+            (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
+            (_const(_SEC, "kSecReturnRef"), _const(_CF, "kCFBooleanTrue")),
+            (_const(_SEC, "kSecMatchLimit"), _const(_SEC, "kSecMatchLimitOne")),
+        ], pool)
+        out = ctypes.c_void_p()
+        status = _SEC.SecItemCopyMatching(query, ctypes.byref(out))
+    finally:
+        _drain(pool)
     if status != 0 or not out:
         raise SealedSignerError(f"sealed key not found: {key_id} (OSStatus {status})")
     return out
@@ -200,45 +232,53 @@ def create_signing_key(key_id: str, *, require_user_presence: bool = True) -> di
     _require_available()
     _validate_key_id(key_id)
     try:
-        _copy_key_ref(key_id)
+        existing = _copy_key_ref(key_id)
+    except SealedSignerError:
+        existing = None
+    if existing is not None:
+        _CF.CFRelease(existing)
         raise SealedSignerError(f"a sealed key already exists for key_id={key_id}")
-    except SealedSignerError as exc:
-        if "already exists" in str(exc):
-            raise
 
-    flags = _kPrivateKeyUsage | (_kUserPresence if require_user_presence else 0)
-    err = ctypes.c_void_p()
-    access = _SEC.SecAccessControlCreateWithFlags(
-        None, _const(_SEC, "kSecAttrAccessibleWhenUnlockedThisDeviceOnly"), flags, ctypes.byref(err),
-    )
-    if not access:
-        raise SealedSignerError(f"SecAccessControlCreateWithFlags failed: {_cferror_text(err)}")
-    access = ctypes.c_void_p(access)
+    pool: list = []
+    try:
+        flags = _kPrivateKeyUsage | (_kUserPresence if require_user_presence else 0)
+        err = ctypes.c_void_p()
+        access = _SEC.SecAccessControlCreateWithFlags(
+            None, _const(_SEC, "kSecAttrAccessibleWhenUnlockedThisDeviceOnly"), flags, ctypes.byref(err),
+        )
+        if not access:
+            raise SealedSignerError(f"SecAccessControlCreateWithFlags failed: {_cferror_text(err)}")
+        access = ctypes.c_void_p(access)
+        pool.append(access)
 
-    private_attrs = _cfdict([
-        (_const(_SEC, "kSecAttrIsPermanent"), _const(_CF, "kCFBooleanTrue")),
-        (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id))),
-        (_const(_SEC, "kSecAttrAccessControl"), access),
-    ])
-    params = _cfdict([
-        (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
-        (_const(_SEC, "kSecAttrKeySizeInBits"), _cfnumber(256)),
-        (_const(_SEC, "kSecAttrTokenID"), _const(_SEC, "kSecAttrTokenIDSecureEnclave")),
-        (_const(_SEC, "kSecPrivateKeyAttrs"), private_attrs),
-    ])
-    err = ctypes.c_void_p()
-    priv = _SEC.SecKeyCreateRandomKey(params, ctypes.byref(err))
-    _CF.CFRelease(params)
-    if not priv:
-        detail = _cferror_text(err)
-        if "-25308" in detail or "-34018" in detail:
-            raise SealedSignerError(
-                "Secure Enclave key creation needs an interactive login session (the human is "
-                "present) and/or a host entitled for keychain access — run it from your GUI "
-                f"Terminal or the code-signed banto host, not headless. ({detail})"
-            )
-        raise SealedSignerError(f"SecKeyCreateRandomKey failed: {detail}")
-    _CF.CFRelease(ctypes.c_void_p(priv))
+        private_attrs = _cfdict([
+            (_const(_SEC, "kSecAttrIsPermanent"), _const(_CF, "kCFBooleanTrue")),
+            (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id), pool)),
+            (_const(_SEC, "kSecAttrAccessControl"), access),
+        ], pool)
+        # The Secure-Enclave TokenID is MANDATORY here: it is what makes the private
+        # key non-extractable. There is no software-key path in this function; if the
+        # enclave is unavailable, SecKeyCreateRandomKey fails and we raise (below).
+        params = _cfdict([
+            (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
+            (_const(_SEC, "kSecAttrKeySizeInBits"), _cfnumber(256, pool)),
+            (_const(_SEC, "kSecAttrTokenID"), _const(_SEC, "kSecAttrTokenIDSecureEnclave")),
+            (_const(_SEC, "kSecPrivateKeyAttrs"), private_attrs),
+        ], pool)
+        err = ctypes.c_void_p()
+        priv = _SEC.SecKeyCreateRandomKey(params, ctypes.byref(err))
+        if not priv:
+            detail = _cferror_text(err)
+            if "-25308" in detail or "-34018" in detail:
+                raise SealedSignerError(
+                    "Secure Enclave key creation needs an interactive login session (the human is "
+                    "present) and/or a host entitled for keychain access — run it from your GUI "
+                    f"Terminal or the code-signed banto host, not headless. ({detail})"
+                )
+            raise SealedSignerError(f"SecKeyCreateRandomKey failed: {detail}")
+        _CF.CFRelease(ctypes.c_void_p(priv))
+    finally:
+        _drain(pool)
     pub = export_public_key(key_id)
     return {
         "key_id": key_id,
@@ -296,8 +336,9 @@ def sign(key_id: str, payload: bytes) -> bytes:
     if not isinstance(payload, (bytes, bytearray)):
         raise SealedSignerError("payload must be bytes")
     priv = _copy_key_ref(key_id)
+    pool: list = []
     try:
-        data = _cfdata(bytes(payload))
+        data = _cfdata(bytes(payload), pool)
         err = ctypes.c_void_p()
         sig = _SEC.SecKeyCreateSignature(
             priv, _const(_SEC, "kSecKeyAlgorithmECDSASignatureMessageX962SHA256"), data, ctypes.byref(err),
@@ -307,8 +348,8 @@ def sign(key_id: str, payload: bytes) -> bytes:
         sig = ctypes.c_void_p(sig)
         der = _cfdata_bytes(sig)
         _CF.CFRelease(sig)
-        _CF.CFRelease(data)
     finally:
+        _drain(pool)
         _CF.CFRelease(priv)
     return der
 
@@ -320,12 +361,13 @@ def _ephemeral_software_sign(payload: bytes) -> tuple[bytes, bytes]:
     """
     _require_available()
     err = ctypes.c_void_p()
+    pool: list = []
     params = _cfdict([
         (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
-        (_const(_SEC, "kSecAttrKeySizeInBits"), _cfnumber(256)),
-    ])
+        (_const(_SEC, "kSecAttrKeySizeInBits"), _cfnumber(256, pool)),
+    ], pool)
     priv = _SEC.SecKeyCreateRandomKey(params, ctypes.byref(err))
-    _CF.CFRelease(params)
+    _drain(pool)
     if not priv:
         raise SealedSignerError(f"software key gen failed: {_cferror_text(err)}")
     priv = ctypes.c_void_p(priv)
@@ -335,15 +377,15 @@ def _ephemeral_software_sign(payload: bytes) -> tuple[bytes, bytes]:
         x963 = _cfdata_bytes(pub_data)
         _CF.CFRelease(pub_data)
         _CF.CFRelease(pub)
-        data = _cfdata(bytes(payload))
+        data = _cfdata(bytes(payload), pool)
         sig = ctypes.c_void_p(_SEC.SecKeyCreateSignature(
             priv, _const(_SEC, "kSecKeyAlgorithmECDSASignatureMessageX962SHA256"), data, ctypes.byref(err)))
         if not sig:
             raise SealedSignerError(f"software sign failed: {_cferror_text(err)}")
         der = _cfdata_bytes(sig)
         _CF.CFRelease(sig)
-        _CF.CFRelease(data)
     finally:
+        _drain(pool)
         _CF.CFRelease(priv)
     return x963, der
 
@@ -369,15 +411,16 @@ def enclave_usable() -> bool:
 def list_signing_keys() -> list[str]:
     """Return the key_ids of all sealed banto signing keys in the keychain."""
     _require_available()
+    pool: list = []
     query = _cfdict([
         (_const(_SEC, "kSecClass"), _const(_SEC, "kSecClassKey")),
         (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
         (_const(_SEC, "kSecReturnAttributes"), _const(_CF, "kCFBooleanTrue")),
         (_const(_SEC, "kSecMatchLimit"), _const(_SEC, "kSecMatchLimitAll")),
-    ])
+    ], pool)
     out = ctypes.c_void_p()
     status = _SEC.SecItemCopyMatching(query, ctypes.byref(out))
-    _CF.CFRelease(query)
+    _drain(pool)
     if status != 0 or not out:
         return []
     key_ids: list[str] = []
@@ -400,11 +443,12 @@ def list_signing_keys() -> list[str]:
 def delete_signing_key(key_id: str) -> bool:
     _require_available()
     _validate_key_id(key_id)
+    pool: list = []
     query = _cfdict([
         (_const(_SEC, "kSecClass"), _const(_SEC, "kSecClassKey")),
-        (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id))),
+        (_const(_SEC, "kSecAttrApplicationTag"), _cfdata(_tag(key_id), pool)),
         (_const(_SEC, "kSecAttrKeyType"), _const(_SEC, "kSecAttrKeyTypeECSECPrimeRandom")),
-    ])
+    ], pool)
     status = _SEC.SecItemDelete(query)
-    _CF.CFRelease(query)
+    _drain(pool)
     return status == 0
