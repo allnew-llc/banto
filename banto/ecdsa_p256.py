@@ -12,6 +12,7 @@ import hashlib
 # NIST P-256 domain parameters.
 _P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
 _A = (-3) % _P
+_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
 _N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 _GX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
 _GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
@@ -51,10 +52,9 @@ def _mul(k: int, p):
 
 def _on_curve(point) -> bool:
     x, y = point
-    return (y * y - (x * x * x + _A * x + _B)) % _P == 0
-
-
-_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+    # Coordinate range is part of "on curve": (x+P, y) satisfies the curve equation
+    # mod P but is not a valid point. Fold the range check in so any caller is safe.
+    return 0 <= x < _P and 0 <= y < _P and (y * y - (x * x * x + _A * x + _B)) % _P == 0
 
 
 def public_key_from_x963(raw: bytes):

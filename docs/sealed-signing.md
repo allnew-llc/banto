@@ -10,10 +10,14 @@ leave the enclave, so no caller (human or agent) can copy it. banto only:
 - **signs** a payload — raising a **Touch ID / passcode prompt per signature** when
   the key requires user presence.
 
-That last property is the point: an autonomous agent that controls the workspace
-**cannot mint a signature silently** — a human must approve each one at the machine.
-This makes a sealed key a genuine *external root of trust* (e.g. for
-`ios-app-factory-v5` TCB rotation-receipt reviewers).
+That last property is the point: with a **user-presence** key, an autonomous agent
+that controls the workspace **cannot mint a signature silently** — each signature
+raises a Touch ID / passcode prompt that a human approves at the machine. This is
+what makes a sealed key an *external root of trust* (e.g. for `ios-app-factory-v5`
+TCB rotation-receipt reviewers). Read **Honest limits** below for the exact bounds of
+that guarantee — it holds only for presence-required keys, presence is satisfiable by
+passcode as well as biometry, and it assumes the agent cannot drive the GUI to click
+the approval itself.
 
 - Algorithm: **ECDSA P-256 / SHA-256**. Signatures are DER-encoded.
 - Public key: X9.63 uncompressed (`0x04 || X || Y`), 65 bytes.
@@ -70,10 +74,15 @@ independent reviewers):
 
 ## MCP tools
 
-`banto_sealed_create_key`, `banto_sealed_export_pubkey`, `banto_sealed_sign`,
-`banto_sealed_list`, `banto_sealed_delete`. An agent can orchestrate, but
-`banto_sealed_sign` triggers the human Touch ID prompt — the agent cannot complete
-a signature on its own.
+`banto_sealed_create_key` (always creates a **user-presence** key — the agent has no
+knob to disable the prompt), `banto_sealed_export_pubkey`, `banto_sealed_sign`,
+`banto_sealed_list`. An agent can orchestrate, but `banto_sealed_sign` triggers the
+human Touch ID prompt — the agent cannot complete a signature on its own.
+
+**Deletion is intentionally NOT an MCP tool.** Deleting a reviewer key and
+re-creating one under the same `key_id` is a trust-root substitution/downgrade
+attack, so `delete` and `--no-presence` creation are **operator-only**, via
+`banto sealed …` in an interactive terminal — never over the agent surface.
 
 ## Honest limits
 
@@ -84,3 +93,16 @@ a signature on its own.
   user presence requires biometry/passcode; without it, any process with a keychain
   session can invoke signing (still non-extractable, but not human-gated). Use user
   presence for a real root of trust.
+- **Presence ≠ biometry.** macOS satisfies user presence with the **device passcode**
+  as well as Touch ID. The gate proves "someone who can unlock this Mac approved," not
+  "a specific human's fingerprint." Provision reviewer keys on machines whose passcode
+  the automation agent does not know.
+- **The gate assumes the agent cannot drive the GUI.** If the same actor that requests
+  the signature can also move the mouse / press keys on the reviewer's machine (screen
+  sharing, a computer-use agent, physical access), it can approve its own prompt. Keep
+  the signing machine outside the automation's control surface.
+- **Substitution is fenced off, not impossible.** `delete` is removed from MCP so a
+  compromised agent cannot delete-and-recreate a reviewer key under the same `key_id`.
+  An operator with terminal access still can — treat `banto sealed delete` and
+  `--no-presence` as privileged, and pin public keys in the v5 trust-roots so an
+  unexpected key swap is at least detectable.
