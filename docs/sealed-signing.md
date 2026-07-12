@@ -72,6 +72,17 @@ independent reviewers):
    signatures go into the rotation receipt.
 4. `v5_tcb_rotation.py` verifies both signatures against the trusted roots.
 
+> **Critical: the trust-roots file must be outside the automation's write surface.**
+> The enclave gives a non-extractable, human-gated signer, but the verifier trusts
+> whatever public keys sit in `tcb-rotation-trust-roots.json`. If that file lives in
+> a workspace a compromised agent can write, the agent bypasses the enclave entirely
+> — it generates an ordinary *software* P-256 keypair, enrols its own public key as a
+> "trusted reviewer," and signs claims with the key it holds (no Touch ID ever). **The
+> external root of trust is only as external as this registry.** Provision it on a
+> machine/branch the agent cannot write (e.g. pinned in a protected git branch, or
+> each root entry countersigned out-of-band); pinning it in the v5 TCB manifest under
+> HEAD-anchoring makes a key swap *detectable*, not *prevented*.
+
 ## MCP tools
 
 `banto_sealed_create_key` (always creates a **user-presence** key — the agent has no
