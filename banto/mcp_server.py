@@ -696,5 +696,72 @@ def main() -> None:
         sys.exit(1)
 
 
+# ── Sealed signing tools (Secure Enclave, ECDSA-P256) ────────────
+# The private key is generated inside the Secure Enclave and is NON-EXTRACTABLE.
+# banto never returns key material. Signing raises a Touch ID / passcode prompt per
+# call (user presence), so an autonomous agent cannot mint a signature silently —
+# this is the "external root of trust" property (e.g. for v5 TCB rotation receipts).
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_create_key(key_id: str, require_user_presence: bool = True) -> dict:
+    """Create a NON-EXTRACTABLE EC P-256 signing key in the Secure Enclave.
+
+    Requires an interactive login session (the human is present). Returns the PUBLIC
+    key only (for registration in a trust-roots file); the private key never leaves
+    the enclave and is never returned.
+    """
+    from . import sealed_signer
+
+    info = sealed_signer.create_signing_key(key_id, require_user_presence=require_user_presence)
+    return {"structuredContent": info, "content": f"Sealed key '{key_id}' created (P-256, presence={require_user_presence})."}
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_export_pubkey(key_id: str) -> dict:
+    """Return the PUBLIC key (X9.63 + x/y) of a sealed signing key — non-secret."""
+    from . import sealed_signer
+
+    info = sealed_signer.export_public_key(key_id)
+    return {"structuredContent": info, "content": f"Public key for '{key_id}' (curve {info['curve']})."}
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_sign(key_id: str, payload_hex: str) -> dict:
+    """Sign a hex-encoded payload with a sealed key (ECDSA-P256/SHA-256).
+
+    Triggers a Touch ID / passcode prompt (user presence) — the human at the machine
+    must approve. Returns a DER signature (hex). The private key never leaves the
+    enclave.
+    """
+    from . import sealed_signer
+
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return {"structuredContent": {"error": "payload_hex must be hex"}, "content": "payload_hex must be hex"}
+    der = sealed_signer.sign(key_id, payload)
+    return {"structuredContent": {"key_id": key_id, "signature_hex": der.hex(), "alg": "ecdsa-p256-sha256"},
+            "content": f"Signed with '{key_id}' (human-approved)."}
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
+async def banto_sealed_list() -> dict:
+    """List the key_ids of all sealed banto signing keys."""
+    from . import sealed_signer
+
+    keys = sealed_signer.list_signing_keys()
+    return {"structuredContent": {"keys": keys, "count": len(keys)}, "content": f"{len(keys)} sealed signing key(s)."}
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False})
+async def banto_sealed_delete(key_id: str) -> dict:
+    """Delete a sealed signing key from the enclave/keychain."""
+    from . import sealed_signer
+
+    ok = sealed_signer.delete_signing_key(key_id)
+    return {"structuredContent": {"key_id": key_id, "deleted": ok}, "content": ("Deleted" if ok else "Not found") + f": {key_id}."}
+
+
 if __name__ == "__main__":
     main()
