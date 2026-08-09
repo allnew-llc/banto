@@ -175,90 +175,237 @@ class TestCloudflareDriver:
 
 
 class TestVercelDriver:
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def _linked_dir(self, tmp_path: Path, project_name: str | None = "app",
+                    project_json: str | None = None) -> str:
+        """Seed a fake mkdtemp dir; project_name=None → no .vercel/project.json."""
+        d = tmp_path / "linked"
+        d.mkdir(exist_ok=True)
+        if project_json is not None:
+            (d / ".vercel").mkdir(exist_ok=True)
+            (d / ".vercel" / "project.json").write_text(project_json, encoding="utf-8")
+        elif project_name is not None:
+            (d / ".vercel").mkdir(exist_ok=True)
+            (d / ".vercel" / "project.json").write_text(
+                '{"projectId":"prj_test","orgId":"team_test",'
+                f'"projectName":"{project_name}"}}',
+                encoding="utf-8",
+            )
+        return str(d)
+
+    @staticmethod
+    def _ls_row(env_name: str) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(
+            [], returncode=0,
+            stdout=f" {env_name}   Encrypted   Production   1m ago\n",
+        )
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_exists_true(self, mock_run, _):
-        # First call = vercel link (success), second = env ls
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_exists_true(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path, "my-app")
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link
-            subprocess.CompletedProcess(
-                [], returncode=0, stdout="OPENAI_API_KEY  production  encrypted\n"
-            ),  # env ls
+            self._ls_row("OPENAI_API_KEY"),  # env ls
         ]
         driver = VercelDriver()
         assert driver.exists("OPENAI_API_KEY", "my-app") is True
 
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_put_success(self, mock_run, _):
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_exists_requires_exact_name_match(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """行頭トークンの完全一致で判定 — KEY_EXTRA の行で KEY を存在扱いしない"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            self._ls_row("KEY_EXTRA"),  # env ls
+        ]
+        driver = VercelDriver()
+        assert driver.exists("KEY", "app") is False
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_success(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link
             subprocess.CompletedProcess([], returncode=0),  # env add
+            self._ls_row("KEY"),  # env ls verification
         ]
         driver = VercelDriver()
         assert driver.put("KEY", "val", "app") is True
-        # Second call is env add — verify --cwd is passed
         env_add_call = mock_run.call_args_list[1]
         cmd = env_add_call[0][0]
+        assert cmd[:5] == ["/usr/bin/vercel", "env", "add", "KEY", "production"]
+        assert "--force" in cmd
         assert "--cwd" in cmd
-        assert "--sensitive" in cmd
-        assert "--yes" in cmd
+        # Secret value travels via stdin, never argv
         assert env_add_call.kwargs["input"] == "val"
+        assert "val" not in cmd
 
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_put_preview_uses_all_branches_and_sensitive_secret(self, mock_run, _):
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_omits_sensitive_and_yes_flags(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """回帰テスト (2026-08-09): 非対話の env add に --sensitive を付けると
+        exit 0 で成功を装いながら値が保存されない (--force upsert では旧値温存、
+        新規 add では空文字保存 — vercel/vercel#16160)。--yes も同バグの
+        トリガー組み合わせの一部なので env add には付けない。"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link
             subprocess.CompletedProcess([], returncode=0),  # env add
+            self._ls_row("STRIPE_SECRET_KEY"),  # env ls verification
+        ]
+        driver = VercelDriver()
+        assert driver.put("STRIPE_SECRET_KEY", "val", "app") is True
+        cmd = mock_run.call_args_list[1][0][0]
+        assert "--sensitive" not in cmd
+        assert "--yes" not in cmd
+        assert "--force" in cmd
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_verifies_row_after_add(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """env add が exit 0 でも env ls に行が現れなければ False"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=0),  # env add
+            subprocess.CompletedProcess([], returncode=0, stdout="OTHER  Encrypted\n"),
+        ]
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "app") is False
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_refuses_wrong_linked_project(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """link が別プロジェクトに解決された場合は書き込まず False (fail closed)"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path, "other-app")
+        mock_run.return_value = subprocess.CompletedProcess([], returncode=0)  # link
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "app") is False
+        # Only the link call ran — the secret was never sent anywhere
+        assert mock_run.call_count == 1
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_fails_closed_without_project_json(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path, project_name=None)
+        mock_run.return_value = subprocess.CompletedProcess([], returncode=0)  # link
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "app") is False
+        assert mock_run.call_count == 1
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_accepts_legacy_project_json(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """projectName を書かない旧CLI形式は projectId の存在で受け入れる"""
+        mock_mkdtemp.return_value = self._linked_dir(
+            tmp_path, project_json='{"projectId":"prj_test","orgId":"team_test"}',
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=0),  # env add
+            self._ls_row("KEY"),  # env ls verification
+        ]
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "app") is True
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_scoped_target(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """"team/project" 形式は --scope 付きで link し、project 名のみ照合"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path, "app")
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=0),  # env add
+            self._ls_row("KEY"),  # env ls verification
+        ]
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "all-new/app") is True
+        link_cmd = mock_run.call_args_list[0][0][0]
+        assert "--scope" in link_cmd
+        assert link_cmd[link_cmd.index("--scope") + 1] == "all-new"
+        assert link_cmd[link_cmd.index("--project") + 1] == "app"
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_preview_has_no_empty_branch_arg(self, _, mock_run, mock_mkdtemp, tmp_path):
+        """preview は空文字の branch 位置引数なしで全ブランチに適用"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=0),  # env add
+            self._ls_row("XAI_API_KEY"),  # env ls verification
         ]
         driver = VercelDriver()
         assert driver.put("XAI_API_KEY", "val", "app", environments=["preview"]) is True
+        cmd = mock_run.call_args_list[1][0][0]
+        assert cmd[:5] == ["/usr/bin/vercel", "env", "add", "XAI_API_KEY", "preview"]
+        assert "" not in cmd
+        assert "--sensitive" not in cmd
 
-        env_add_call = mock_run.call_args_list[1]
-        cmd = env_add_call[0][0]
-        assert cmd[:6] == [
-            "/usr/bin/vercel",
-            "env",
-            "add",
-            "XAI_API_KEY",
-            "preview",
-            "",
-        ]
-        assert "--sensitive" in cmd
-        assert env_add_call.kwargs["input"] == "val"
-
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_put_development_omits_sensitive_flag(self, mock_run, _):
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_multiple_environments(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link
-            subprocess.CompletedProcess([], returncode=0),  # env add
+            subprocess.CompletedProcess([], returncode=0),  # env add production
+            self._ls_row("KEY"),  # env ls production
+            subprocess.CompletedProcess([], returncode=0),  # env add development
+            self._ls_row("KEY"),  # env ls development
         ]
         driver = VercelDriver()
-        assert driver.put("OPENAI_API_KEY", "val", "app", environments=["development"]) is True
+        assert driver.put("KEY", "val", "app",
+                          environments=["production", "development"]) is True
+        add_prod = mock_run.call_args_list[1][0][0]
+        add_dev = mock_run.call_args_list[3][0][0]
+        assert "production" in add_prod
+        assert "development" in add_dev
 
-        env_add_call = mock_run.call_args_list[1]
-        cmd = env_add_call[0][0]
-        assert "development" in cmd
-        assert "--sensitive" not in cmd
-        assert "--force" in cmd
-        assert env_add_call.kwargs["input"] == "val"
-
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_delete_success(self, mock_run, _):
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_env_add_fails(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], returncode=0),  # link
+            subprocess.CompletedProcess([], returncode=1),  # env add fails
+        ]
+        driver = VercelDriver()
+        assert driver.put("KEY", "val", "app") is False
+
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
+    @patch("banto.sync.drivers.vercel.subprocess.run")
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_delete_success(self, _, mock_run, mock_mkdtemp, tmp_path):
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
         mock_run.side_effect = [
             subprocess.CompletedProcess([], returncode=0),  # link
             subprocess.CompletedProcess([], returncode=0),  # env rm
         ]
         driver = VercelDriver()
         assert driver.delete("KEY", "app") is True
+        rm_cmd = mock_run.call_args_list[1][0][0]
+        assert "--yes" in rm_cmd  # documented for env rm; env add は対象外
 
-    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    @patch("banto.sync.drivers.vercel.tempfile.mkdtemp")
     @patch("banto.sync.drivers.vercel.subprocess.run")
-    def test_put_link_fails(self, mock_run, _):
+    @patch("banto.sync.drivers.vercel._find_vercel", return_value="/usr/bin/vercel")
+    def test_put_link_fails(self, _, mock_run, mock_mkdtemp, tmp_path):
         """vercel link が失敗した場合は False"""
+        mock_mkdtemp.return_value = self._linked_dir(tmp_path)
         mock_run.return_value = subprocess.CompletedProcess([], returncode=1)
         driver = VercelDriver()
         assert driver.put("KEY", "val", "app") is False
