@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Vercel push silently not updating values** (2026-08-09 incident): `vercel env add` in non-interactive mode with `--sensitive` reports success (exit 0) while failing to persist the value — old value retained on `--force` upserts of existing rows, empty value on fresh adds (vercel/vercel#16160). The driver now uses the proven-working form `vercel env add <NAME> <environment> --force` with the value on stdin, and no longer passes `--sensitive`/`--yes` to `env add`. Values remain encrypted at rest; enforce the sensitive marking via Vercel's team-level sensitive environment variable policy
+- **Preview pushes**: no longer pass an empty git-branch positional; `vercel env add <NAME> preview` applies to all branches by default
+
+### Added
+
+- **Verified Vercel writes**: after `vercel link`, the driver checks `.vercel/project.json` `projectName` against the requested project and refuses to write on mismatch (fail closed — `vercel link --yes` can resolve to or auto-create an unintended project). After each `env add`, the row's existence is confirmed via `vercel env ls <environment>` before reporting OK
+- **Team-scoped Vercel targets**: `--target vercel:<team>/<project>` passes `--scope <team>` to `vercel link`, so resolution no longer depends on the CLI's default team
+- **`banto sync add --environments production,preview`**: sets `Target.environments` from the CLI (previously only editable by hand in sync.json), controlling which Vercel environment rows a push updates
+
 ## 5.2.0 (2026-03-26) — sync setup Security Hardening
 
 Addresses findings from independent security and legal re-audit (March 25, 2026).
