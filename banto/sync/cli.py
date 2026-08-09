@@ -476,12 +476,14 @@ def cmd_sync_add(args: list[str]) -> None:
     config, config_path = _load_config(args)
 
     # Parse: banto sync add <name> --env <ENV_VAR> [--target platform:project ...]
+    #         [--environments production,preview,...]  — platform environments for non-local targets
     #         [--account <keychain_account>]  — reference existing Keychain entry, skip value input
     name = None
     env_name = None
     description = ""
     account = None
     targets: list[str] = []
+    environments: list[str] | None = None
 
     i = 0
     while i < len(args):
@@ -493,6 +495,9 @@ def cmd_sync_add(args: list[str]) -> None:
             i += 2
         elif args[i] == "--target" and i + 1 < len(args):
             targets.append(args[i + 1])
+            i += 2
+        elif args[i] == "--environments" and i + 1 < len(args):
+            environments = [e.strip() for e in args[i + 1].split(",") if e.strip()]
             i += 2
         elif args[i] == "--account" and i + 1 < len(args):
             account = args[i + 1]
@@ -508,8 +513,15 @@ def cmd_sync_add(args: list[str]) -> None:
             i += 1
 
     if not name or not env_name:
-        print("Usage: banto sync add <name> --env <ENV_VAR> [--target platform:project] [--account <keychain_account>]")
+        print("Usage: banto sync add <name> --env <ENV_VAR> [--target platform:project] [--environments production,preview] [--account <keychain_account>]")
         sys.exit(1)
+
+    if environments is not None:
+        valid_envs = {"production", "preview", "development"}
+        invalid = [e for e in environments if e not in valid_envs]
+        if invalid or not environments:
+            print(f"Error: --environments accepts a comma-separated list of {', '.join(sorted(valid_envs))} — got '{','.join(environments) or ''}'")
+            sys.exit(1)
 
     if config.get_secret(name):
         print(f"Error: Secret '{name}' already exists.")
@@ -551,7 +563,9 @@ def cmd_sync_add(args: list[str]) -> None:
         if platform == "local":
             parsed_targets.append(Target(platform="local", file=project))
         else:
-            parsed_targets.append(Target(platform=platform, project=project))
+            parsed_targets.append(Target(
+                platform=platform, project=project, environments=environments,
+            ))
 
     entry = SecretEntry(
         name=name, account=effective_account, env_name=env_name,
