@@ -52,7 +52,7 @@ Expected flow:
 3. 必要に応じてxAI propagation endpointでクラスタ反映を待つ。
 4. 新しい値をKeychainへ保存する。
 5. banto historyにfingerprintのみを記録する。
-6. Vercelへ`vercel env add --sensitive --force --yes`で反映する。
+6. Vercelへ`vercel env add <NAME> <environment> --force`(値はstdin)で反映する。`--sensitive`は非対話実行で成功を装いながら値を保存しないため付けない(vercel/vercel#16160)。
 7. smoke presetを実行する。
 8. 成功後に旧xAI API keyを削除する。
 
@@ -157,14 +157,15 @@ Expected flow:
 3. cleanupやrollbackの結果を構造化して返す。
 4. 旧keyの削除は成功後のみ実行する。
 
-## Scenario S7: Vercel Sensitive Multi-Environment Push
+## Scenario S7: Vercel Multi-Environment Push
 
 Expected flow:
 
-1. `Target.environments`が指定されていれば各environmentへ反映する。
-2. Vercel driverは`--sensitive --force --yes`を付ける。
-3. previewの全branch対象は空のgit branch引数で表現する。
-4. Vercel以外のdriverには`environments`を強制しない。
+1. `Target.environments`が指定されていれば各environmentへ反映する(`banto sync add --environments production,preview`で設定可能)。
+2. Vercel driverは`--force`のみ付け、値はstdinで渡す。`--sensitive`/`--yes`は非対話`env add`で成功を装いながら値を保存しない既知バグの組み合わせのため付けない(vercel/vercel#16160)。sensitiveマーキングが必要な場合はVercelチーム設定のsensitive environment variable policyで強制する。
+3. previewは環境名のみ指定し全branchに適用する(空のgit branch引数は渡さない)。
+4. 書き込み後に`vercel env ls <environment>`で行の存在を確認し、`vercel link`の解決先は`.vercel/project.json`の`projectName`で照合する(不一致なら書き込まずFAIL)。
+5. Vercel以外のdriverには`environments`を強制しない。
 
 ## Scenario S8: Management Credential Missing
 
