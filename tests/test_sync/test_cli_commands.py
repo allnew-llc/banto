@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from banto.sync.cli import (
+    cmd_sync_add,
     cmd_sync_audit,
     cmd_sync_import,
     cmd_sync_import_keychain,
@@ -18,6 +19,7 @@ from banto.sync.cli import (
     cmd_sync_run,
 )
 from banto.sync.config import SecretEntry, SyncConfig, Target
+from banto.sync.sync import SyncReport
 
 
 @pytest.fixture
@@ -34,6 +36,69 @@ def sync_config(tmp_path: Path) -> tuple[SyncConfig, Path]:
     config_path = tmp_path / "sync.json"
     config.save(config_path)
     return config, config_path
+
+
+class TestSyncAddEnvironments:
+    """`sync add --environments` — Vercel等の環境行を明示指定できるようにする。
+
+    回帰の背景 (2026-08-09): 同名変数が Production/Preview/Development の
+    別行に分かれる Vercel で、push 対象環境を config で指定する手段が
+    CLI に無かった。
+    """
+
+    def _add(self, args: list[str], tmp_path: Path) -> Path:
+        config_path = tmp_path / "sync.json"
+        SyncConfig(keychain_service="test-sync").save(config_path)
+        with patch("banto.sync.cli.getpass.getpass", return_value="dummy-value"), \
+             patch("banto.sync.cli.KeychainStore") as mock_kc, \
+             patch("banto.sync.cli.HistoryStore") as mock_hist, \
+             patch("banto.sync.cli.sync_secret", return_value=SyncReport()):
+            mock_kc.return_value.store.return_value = True
+            mock_hist.return_value.record.return_value = 1
+            cmd_sync_add(args + ["--config", str(config_path)])
+        return config_path
+
+    def test_environments_saved_on_platform_target(self, tmp_path: Path):
+        config_path = self._add(
+            ["stripe", "--env", "STRIPE_SECRET_KEY",
+             "--target", "vercel:honntokoro-landing-page",
+             "--environments", "production,preview"],
+            tmp_path,
+        )
+        config = SyncConfig.load(config_path)
+        target = config.get_secret("stripe").targets[0]
+        assert target.platform == "vercel"
+        assert target.environments == ["production", "preview"]
+
+    def test_environments_default_is_unset(self, tmp_path: Path):
+        config_path = self._add(
+            ["stripe", "--env", "STRIPE_SECRET_KEY",
+             "--target", "vercel:my-app"],
+            tmp_path,
+        )
+        config = SyncConfig.load(config_path)
+        assert config.get_secret("stripe").targets[0].environments is None
+
+    def test_environments_not_applied_to_local_target(self, tmp_path: Path):
+        config_path = self._add(
+            ["stripe", "--env", "STRIPE_SECRET_KEY",
+             "--target", f"local:{tmp_path / '.dev.vars'}",
+             "--environments", "production"],
+            tmp_path,
+        )
+        config = SyncConfig.load(config_path)
+        assert config.get_secret("stripe").targets[0].environments is None
+
+    def test_invalid_environment_rejected(self, tmp_path: Path):
+        config_path = tmp_path / "sync.json"
+        SyncConfig(keychain_service="test-sync").save(config_path)
+        with pytest.raises(SystemExit):
+            cmd_sync_add(
+                ["stripe", "--env", "STRIPE_SECRET_KEY",
+                 "--target", "vercel:my-app",
+                 "--environments", "prod",
+                 "--config", str(config_path)],
+            )
 
 
 class TestRotate:
