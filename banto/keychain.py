@@ -189,9 +189,12 @@ class KeychainStore:
 
     DEFAULT_PREFIX = "banto"
 
-    def __init__(self, *, service_prefix: str | None = None):
+    def __init__(self, *, service_prefix: str | None = None, account: str | None = None):
         self.prefix = _validate_prefix(service_prefix) if service_prefix else self.DEFAULT_PREFIX
-        self.account = default_keychain_account()
+        resolved_account = account.strip() if account is not None else default_keychain_account()
+        if not resolved_account or "\x00" in resolved_account:
+            raise ValueError("Keychain account must be a non-empty string without NUL bytes.")
+        self.account = resolved_account
         self.keychain_path = os.path.expanduser(
             "~/Library/Keychains/login.keychain-db"
         )
