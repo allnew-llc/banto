@@ -79,6 +79,8 @@ from .xai_rotator import (
     build_xai_api_key_plan,
     rotate_xai_api_key,
 )
+from .x_oauth_rotator import XOAuthRotatorError, rotate_x_oauth_user_token
+from .x_oauth_pkce import XOAuthPKCEError, authorize_x_oauth_user_token
 from .incident_report import INCIDENT_LANE_ORDER, LANE_LABELS, build_incident_report
 from .propagation import build_propagation_plan, propagate_secret, validate_propagation_plan
 from .smoke_presets import list_smoke_presets, smoke_preset_exists
@@ -1407,6 +1409,85 @@ def cmd_sync_rotate(args: list[str]) -> None:
         _print_report(report)
         if not report.all_ok:
             sys.exit(1)
+
+
+def cmd_sync_x_oauth_user_token(args: list[str]) -> None:
+    """Rotate an X OAuth 2.0 user access/refresh token pair in Keychain."""
+    def option(name: str, default: str) -> str:
+        return (
+            args[args.index(name) + 1]
+            if name in args and args.index(name) + 1 < len(args)
+            else default
+        )
+
+    try:
+        result = rotate_x_oauth_user_token(
+            service_prefix=option("--service-prefix", "allnew-x"),
+            account=option("--account", "allnew_llc"),
+            expected_username=option("--expected-username", "allnew_llc"),
+            revoke_previous_access="--no-revoke-previous" not in args,
+        )
+    except (XOAuthRotatorError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    payload = {
+        "ok": True,
+        "username": result.username,
+        "user_id": result.user_id,
+        "expires_in": result.expires_in,
+        "scope": result.scope,
+        "previous_access_fingerprint": result.previous_access_fingerprint,
+        "current_access_fingerprint": result.current_access_fingerprint,
+        "refresh_rotated": result.refresh_rotated,
+        "previous_access_revoked": result.previous_access_revoked,
+        "previous_access_inactive": result.previous_access_inactive,
+        "persisted_readback_verified": result.persisted_readback_verified,
+    }
+    if _is_json(args):
+        _json_out(payload)
+        return
+    print("BANTO X OAUTH ROTATION — complete")
+    for key, value in payload.items():
+        print(f"  {key}: {value}")
+
+
+def cmd_sync_x_oauth_authorize(args: list[str]) -> None:
+    """Enroll an exact-scope X OAuth 2.0 token pair using PKCE."""
+    def option(name: str, default: str) -> str:
+        return (
+            args[args.index(name) + 1]
+            if name in args and args.index(name) + 1 < len(args)
+            else default
+        )
+
+    try:
+        result = authorize_x_oauth_user_token(
+            service_prefix=option("--service-prefix", "allnew-x"),
+            account=option("--account", "allnew_llc"),
+            expected_username=option("--expected-username", "allnew_llc"),
+            redirect_uri=option("--redirect-uri", "http://127.0.0.1:8765/callback"),
+        )
+    except (XOAuthPKCEError, XOAuthRotatorError, ValueError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    payload = {
+        "ok": True,
+        "username": result.username,
+        "user_id": result.user_id,
+        "expires_in": result.expires_in,
+        "scopes": list(result.scopes),
+        "previous_grant_retired": result.previous_grant_retired,
+        "previous_access_inactive": result.previous_access_inactive,
+        "persisted_readback_verified": result.persisted_readback_verified,
+    }
+    if _is_json(args):
+        _json_out(payload)
+        return
+    print("BANTO X OAUTH PKCE — complete")
+    for key, value in payload.items():
+        print(f"  {key}: {value}")
 
 
 def cmd_sync_propagate(args: list[str]) -> None:
@@ -3918,6 +3999,8 @@ SYNC_COMMANDS = {
     "openai-service-accounts": cmd_sync_openai_service_accounts,
     "openai-revoke-service-account": cmd_sync_openai_revoke_service_account,
     "xai-api-key": cmd_sync_xai_api_key,
+    "x-oauth-user-token": cmd_sync_x_oauth_user_token,
+    "x-oauth-authorize": cmd_sync_x_oauth_authorize,
     "browser-batch": cmd_sync_browser_batch,
     "browser-record": cmd_sync_browser_record,
     "browser-issue": cmd_sync_browser_issue,
@@ -3962,6 +4045,8 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  openai-service-accounts --project-id <proj_...>")
         print("  openai-revoke-service-account --project-id <proj_...> --service-account-id <svc_...>")
         print("  xai-api-key <name> --team-id <team_id>")
+        print("  x-oauth-user-token  Rotate an X OAuth 2.0 user-token pair")
+        print("  x-oauth-authorize   Enroll an exact-scope X OAuth token pair with PKCE")
         print("  browser-batch <plan.json>")
         print("  browser-record <name> --start-url <url> --output <recipe.json>")
         print("  browser-issue <name> --recipe <recipe.json>")

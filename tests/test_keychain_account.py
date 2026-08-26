@@ -21,3 +21,18 @@ def test_keychain_store_uses_default_account(monkeypatch):
     monkeypatch.setenv("USER", "masa")
 
     assert KeychainStore(service_prefix="banto-sync").account == "masa"
+
+
+def test_keychain_store_accepts_explicit_account(monkeypatch):
+    monkeypatch.setenv("USER", "masa")
+
+    assert KeychainStore(service_prefix="allnew-x", account="allnew_llc").account == "allnew_llc"
+
+
+def test_keychain_store_rejects_invalid_explicit_account():
+    for account in ("", "bad\x00account"):
+        try:
+            KeychainStore(service_prefix="allnew-x", account=account)
+        except ValueError:
+            continue
+        raise AssertionError(f"Expected invalid account to fail: {account!r}")
