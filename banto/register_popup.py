@@ -226,7 +226,7 @@ def _build_html(provider_hint: str | None = None) -> str:
     border-radius: 16px;
     padding: 40px 36px 36px;
     width: 100%;
-    max-width: 560px;
+    max-width: 720px;
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4),
                 0 0 0 1px rgba(255, 255, 255, 0.04);
   }}
@@ -250,6 +250,78 @@ def _build_html(provider_hint: str | None = None) -> str:
     font-size: 13px;
     color: #71717a;
     margin-top: 4px;
+  }}
+
+  .intro {{
+    margin: 0 0 22px;
+    padding: 18px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(96, 165, 250, 0.08));
+    border: 1px solid #30303d;
+    border-radius: 14px;
+  }}
+
+  .eyebrow {{
+    color: #a5b4fc;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }}
+
+  .intro h1 {{
+    color: #f4f4f5;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }}
+
+  .intro-copy {{
+    color: #c4c4cc;
+    font-size: 14px;
+    line-height: 1.55;
+    margin-bottom: 14px;
+  }}
+
+  .steps {{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }}
+
+  .step {{
+    min-height: 118px;
+    padding: 12px;
+    background: rgba(17, 17, 24, 0.78);
+    border: 1px solid #30303d;
+    border-radius: 12px;
+  }}
+
+  .step-badge {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    color: #fff;
+    background: #6366f1;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }}
+
+  .step strong {{
+    display: block;
+    color: #f4f4f5;
+    font-size: 13px;
+    margin-bottom: 5px;
+  }}
+
+  .step p {{
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 1.45;
   }}
 
   .guide {{
@@ -336,6 +408,13 @@ def _build_html(provider_hint: str | None = None) -> str:
 
   .field {{
     margin-bottom: 18px;
+  }}
+
+  .field-help {{
+    margin-top: 6px;
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.45;
   }}
 
   label {{
@@ -476,10 +555,40 @@ def _build_html(provider_hint: str | None = None) -> str:
     margin-top: 8px;
   }}
 
+  .success-title {{
+    color: #dcfce7;
+    font-size: 16px;
+    font-weight: 700;
+  }}
+
+  .success-copy {{
+    color: #bbf7d0;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-top: 6px;
+  }}
+
+  .result-list {{
+    display: inline-block;
+    margin: 12px auto 0;
+    text-align: left;
+    color: #a7f3d0;
+    font-size: 13px;
+    line-height: 1.7;
+  }}
+
+  .result-list code {{
+    color: #d1fae5;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 2px 6px;
+  }}
+
   .form-hidden {{ display: none; }}
 
   @media (max-width: 480px) {{
     .card {{ padding: 28px 20px 24px; }}
+    .steps {{ grid-template-columns: 1fr; }}
   }}
 </style>
 </head>
@@ -490,6 +599,32 @@ def _build_html(provider_hint: str | None = None) -> str:
     <div class="logo-text">banto</div>
     <div class="logo-sub">Store API Key in Keychain</div>
   </div>
+
+  <section class="intro" aria-label="Registration overview">
+    <p class="eyebrow">Secure local registration</p>
+    <h1>Add a secret without exposing it in chat or files</h1>
+    <p class="intro-copy">
+      This browser page runs on 127.0.0.1, stores the value directly in macOS Keychain,
+      and only reports whether registration succeeded.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <span class="step-badge">1</span>
+        <strong>Choose the provider</strong>
+        <p>Select a preset or enter a custom Keychain account name.</p>
+      </div>
+      <div class="step">
+        <span class="step-badge">2</span>
+        <strong>Paste the value</strong>
+        <p>The value stays masked and is sent only to this local server.</p>
+      </div>
+      <div class="step">
+        <span class="step-badge">3</span>
+        <strong>Confirm the result</strong>
+        <p>After storage, banto shows OK status without printing the secret.</p>
+      </div>
+    </div>
+  </section>
 
   <form id="form" autocomplete="off" data-hint="{hint_attr}">
     <div class="field">
@@ -526,6 +661,7 @@ def _build_html(provider_hint: str | None = None) -> str:
         </optgroup>
         <option value="_custom">Custom...</option>
       </select>
+      <div class="field-help">This becomes the Keychain account name. Presets also fill the matching environment variable.</div>
     </div>
 
     <div class="guide" id="provider-guide"></div>
@@ -553,12 +689,14 @@ def _build_html(provider_hint: str | None = None) -> str:
       <input type="text" id="custom-provider"
              placeholder="e.g. my-service"
              pattern="[a-zA-Z0-9_-]+" autocomplete="off">
+      <div class="field-help">Use letters, digits, hyphens, or underscores. Avoid project names that include secret material.</div>
     </div>
 
     <div class="field">
       <label for="env-name">Env Variable Name</label>
       <input type="text" id="env-name"
              placeholder="e.g. OPENAI_API_KEY" autocomplete="off">
+      <div class="field-help">Optional metadata for sync targets. The value itself is stored only in Keychain.</div>
     </div>
 
     <div class="field">
@@ -570,6 +708,7 @@ def _build_html(provider_hint: str | None = None) -> str:
         <button type="button" class="toggle-vis" id="toggle-vis"
                 aria-label="Toggle visibility">&#x25CF;</button>
       </div>
+      <div class="field-help">Paste the secret here. banto will not echo it back in the page, terminal, or config file.</div>
     </div>
 
     <div class="field">
@@ -775,11 +914,17 @@ def _build_html(provider_hint: str | None = None) -> str:
 
       const data = await resp.json();
       if (data.ok) {{
+        const providers = Array.isArray(data.providers) && data.providers.length
+          ? data.providers
+          : [providerLabel];
+        const providerList = providers.map(function(provider) {{
+          return '<li><code>' + escapeHtml(provider) + '</code>: OK</li>';
+        }}).join('');
         formEl.classList.add("form-hidden");
         resultEl.innerHTML = '<span class="check">\\u2714</span>'
-          + '<strong>Stored securely</strong><br>'
-          + '<span style="font-size:13px;color:#a1a1aa">'
-          + providerLabel + ' &rarr; Keychain</span>'
+          + '<div class="success-title">Registration complete</div>'
+          + '<div class="success-copy">Stored in Banto / Keychain. Secret values are not displayed.</div>'
+          + '<ul class="result-list">' + providerList + '</ul>'
           + '<div class="close-hint">You can close this tab.</div>';
         resultEl.className = "result success";
       }} else {{
