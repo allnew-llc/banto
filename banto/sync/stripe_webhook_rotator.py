@@ -18,6 +18,8 @@ from .config import SyncConfig
 from .propagation import PropagationPlan, PropagationResult, build_propagation_plan, propagate_secret
 
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+# Platform endpoints and Connect (connected-account) endpoints each have their own signing secret.
+STRIPE_WEBHOOK_SECRET_ENV_NAMES = frozenset({"STRIPE_WEBHOOK_SECRET", "STRIPE_CONNECT_WEBHOOK_SECRET"})
 STRIPE_SECRET_FRAGMENT_RE = re.compile(r"\b((?:sk|rk|pk)_(?:live|test)|whsec)_[A-Za-z0-9*_]+")
 
 
@@ -101,7 +103,7 @@ def build_stripe_webhook_endpoint_plan(
         raise ValueError("At least one Stripe webhook event is required.")
 
     propagation_plan = build_propagation_plan(config, secret_name)
-    if propagation_plan.provider != "stripe" or propagation_plan.env_name != "STRIPE_WEBHOOK_SECRET":
+    if propagation_plan.provider != "stripe" or propagation_plan.env_name not in STRIPE_WEBHOOK_SECRET_ENV_NAMES:
         raise ValueError(f"{propagation_plan.env_name} is not a Stripe webhook secret.")
     if propagation_plan.rotation_class != "manual_cutover":
         raise ValueError(
