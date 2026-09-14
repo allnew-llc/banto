@@ -262,7 +262,7 @@
       "rule_id": "stripe_webhook_secret",
       "provider": "stripe",
       "display_name": "Stripe webhook secret",
-      "env_patterns": ["STRIPE_WEBHOOK_SECRET"],
+      "env_patterns": ["STRIPE_WEBHOOK_SECRET", "STRIPE_CONNECT_WEBHOOK_SECRET"],
       "rotation_class": "manual_cutover",
       "implementation_phase": "phase_5",
       "notes": "Needs coordinated endpoint cutover and potentially dual-secret verification."
