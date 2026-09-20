@@ -38,6 +38,10 @@ def test_classify_secret_known_and_unknown_cases():
     webhook = classify_secret("stripe-webhook", "STRIPE_WEBHOOK_SECRET")
     assert webhook.rotation_class == "manual_cutover"
 
+    connect_webhook = classify_secret("stripe-connect-webhook", "STRIPE_CONNECT_WEBHOOK_SECRET")
+    assert connect_webhook.provider == "stripe"
+    assert connect_webhook.rotation_class == "manual_cutover"
+
     projectc_hmac = classify_secret("projectc-hmac", "BAAS_FACTORY_HMAC_SECRET")
     assert projectc_hmac.provider == "app"
     assert projectc_hmac.rotation_class == "propagate_only"
