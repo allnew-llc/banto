@@ -65,6 +65,27 @@ def test_build_stripe_webhook_plan(stripe_config):
     assert plan.propagation_plan.rotation_class == "manual_cutover"
 
 
+def test_build_stripe_webhook_plan_accepts_connect_webhook_secret(stripe_config):
+    config, _ = stripe_config
+    config.add_secret(SecretEntry(
+        name="stripe-test-connect-webhook",
+        account="stripe-test-connect-webhook",
+        env_name="STRIPE_CONNECT_WEBHOOK_SECRET",
+    ))
+    plan = build_stripe_webhook_endpoint_plan(
+        config,
+        "stripe-test-connect-webhook",
+        source_secret_name="stripe-test-secret",
+        url="https://example.com/api/stripe/webhook",
+        enabled_events=("account.updated",),
+        connect=True,
+    )
+
+    assert plan.connect is True
+    assert plan.propagation_plan.env_name == "STRIPE_CONNECT_WEBHOOK_SECRET"
+    assert plan.propagation_plan.rotation_class == "manual_cutover"
+
+
 def test_build_stripe_webhook_plan_rejects_non_webhook(stripe_config):
     config, _ = stripe_config
     with pytest.raises(ValueError):
