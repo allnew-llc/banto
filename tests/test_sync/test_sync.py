@@ -59,7 +59,9 @@ class TestSyncSecret:
         mock_kc.get.return_value = None
         mock_kc_cls.return_value = mock_kc
 
-        report = sync_secret(config, "openai", audit_log=tmp_path / "audit.log")
+        # The legacy-account fallback must not touch the developer's Keychain.
+        with patch("banto.keychain._ctypes_get", return_value=None):
+            report = sync_secret(config, "openai", audit_log=tmp_path / "audit.log")
         assert not report.all_ok
         assert report.fail_count == 1
 
