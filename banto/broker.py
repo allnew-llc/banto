@@ -19,6 +19,7 @@ import socketserver
 import struct
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -236,6 +237,18 @@ def install() -> None:
     if result.returncode:
         plist_path.unlink()
         raise BrokerError("launch_agent_bootstrap_failed")
+    result = subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+    if result.returncode:
+        raise BrokerError("launch_agent_installed_but_start_failed")
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            BrokerClient(timeout=0.5).call("health")
+            break
+        except BrokerError:
+            if time.monotonic() >= deadline:
+                raise BrokerError("launch_agent_installed_but_not_ready") from None
+            time.sleep(0.1)
     print(json.dumps({"installed": True, "plist": str(plist_path), "python": sys.executable}))
 
 
