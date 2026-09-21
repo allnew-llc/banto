@@ -642,6 +642,12 @@ def main() -> None:
         banto-mcp --transport sse           # SSE (OpenAI Apps SDK dev)
         banto-mcp --transport http --port 8385  # HTTP (production)
     """
+    # Enabling broker mode switches every transport to operation forwarding.
+    from .broker_client import runtime_dir
+    global mcp
+    if (runtime_dir() / "required").exists():
+        from .broker_mcp import build_mcp
+        mcp = build_mcp()
     transport = "stdio"
     port = 8385
 
@@ -668,28 +674,20 @@ def main() -> None:
 
     if transport == "stdio":
         mcp.run(transport="stdio")
-    elif transport == "sse":
+    elif transport in ("sse", "http"):
         if not path_token:
-            print(
-                "WARNING: SSE transport without BANTO_MCP_PATH_TOKEN. "
-                "Set the env var to require a secret URL path.",
-                file=sys.stderr,
-            )
-        mcp.run(transport="sse", sse_path="/sse", host="127.0.0.1", port=port)
-    elif transport == "http":
-        if not path_token:
-            print(
-                "WARNING: HTTP transport without BANTO_MCP_PATH_TOKEN. "
-                "Set the env var to require a secret URL path.",
-                file=sys.stderr,
-            )
-        mcp.run(
-            transport="streamable-http", path=mcp_path,
-            host="127.0.0.1", port=port,
-        )
-        if path_token:
-            print(f"MCP endpoint: http://127.0.0.1:{port}{mcp_path}",
-                  file=sys.stderr)
+            raise SystemExit("HTTP/SSE requires BANTO_MCP_PATH_TOKEN and an authenticated gateway for remote access.")
+        if not all(c.isascii() and (c.isalnum() or c in "-_") for c in path_token) or len(path_token) < 32:
+            raise SystemExit("BANTO_MCP_PATH_TOKEN must be at least 32 URL-safe characters.")
+        # FastMCP.run accepts transport only; network settings belong to Settings.
+        # Never log the capability URL, including through access logs.
+        mcp.settings.host = "127.0.0.1"
+        mcp.settings.port = port
+        mcp.settings.log_level = "WARNING"
+        mcp.settings.streamable_http_path = mcp_path
+        mcp.settings.sse_path = mcp_path + "/sse"
+        mcp.settings.message_path = mcp_path + "/messages/"
+        mcp.run(transport="sse" if transport == "sse" else "streamable-http")
     else:
         print(f"Unknown transport: {transport}", file=sys.stderr)
         print("Supported: stdio, sse, http", file=sys.stderr)
