@@ -92,6 +92,9 @@ _SECURITY_LIB = _load_security_framework()
 
 def _ctypes_store(service: str, account: str, password: str) -> bool:
     """Store a password via Security framework. No argv exposure."""
+    from .broker import require_service, observe_secret
+    require_service()
+    observe_secret(password)
     if _SECURITY_LIB is None:
         return False
     svc = service.encode("utf-8")
@@ -128,6 +131,8 @@ def _ctypes_store(service: str, account: str, password: str) -> bool:
 
 def _ctypes_get(service: str, account: str) -> str | None:
     """Retrieve a password via Security framework. No argv exposure."""
+    from .broker import require_service, observe_secret
+    require_service()
     if _SECURITY_LIB is None:
         return None
     svc = service.encode("utf-8")
@@ -149,6 +154,7 @@ def _ctypes_get(service: str, account: str) -> str | None:
         return None
 
     password = ctypes.string_at(pwd_data, pwd_length.value).decode("utf-8")
+    observe_secret(password)
 
     # Free the password buffer allocated by Security framework
     _SECURITY_LIB.SecKeychainItemFreeContent(None, pwd_data)
@@ -217,6 +223,8 @@ class KeychainStore:
 
     def delete(self, provider: str) -> bool:
         """Delete an API key from Keychain."""
+        from .broker import require_service
+        require_service()
         try:
             result = subprocess.run(
                 [
