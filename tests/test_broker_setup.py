@@ -38,3 +38,18 @@ def test_conflicting_codex_entry_does_not_discard_existing_auth():
 def test_malformed_managed_rules_fail_closed():
     with pytest.raises(ValueError):
         update_rules(START)
+
+
+def test_active_claude_profile_receives_server_and_policy(tmp_path):
+    home, workspace, profile = tmp_path / "home", tmp_path / "workspace", tmp_path / "profile"
+    profile.mkdir()
+    (profile / ".claude.json").write_text('{"model":"preserve-me"}')
+    (profile / "CLAUDE.md").write_text("Existing profile policy.\n")
+    command = Path("/fixture/run-banto-mcp.sh")
+    apply(plan(home, workspace, command, claude_config_dir=profile))
+    actual = json.loads((profile / ".claude.json").read_text())
+    assert actual["model"] == "preserve-me"
+    assert actual["mcpServers"]["banto"]["command"] == str(command)
+    assert (profile / "CLAUDE.md").read_text().startswith("Existing profile policy.")
+    assert START in (profile / "CLAUDE.md").read_text()
+    assert not plan(home, workspace, command, claude_config_dir=profile)
