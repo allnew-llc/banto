@@ -39,6 +39,7 @@ python -m banto.broker_setup --workspace /path/to/workspace --launcher /absolute
 最初のコマンドは変更対象のパスだけ表示し、2番目で適用します。workspaceの `mcp/.mcp.json` と派生設定、
 Codex・Claude Code・Gemini CLIのユーザー設定に同じbanto起動コマンドを登録します。
 各クライアントのユーザー指示にも、秘密値を取り出さずbantoへ操作を依頼する規則を追加します。
+`CLAUDE_CONFIG_DIR` が設定されている場合は、その有効なプロファイルの設定と指示にも反映します。
 他のMCP、モデル、推論努力、認証、承認設定は維持します。自動承認・trust設定は追加しません。
 既存のCodex banto設定が競合する場合は書き換えず停止します。適用後はクライアントの再起動が必要です。
 
