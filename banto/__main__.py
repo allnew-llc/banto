@@ -508,10 +508,20 @@ COMMANDS = {
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "broker":
+        from .broker import main as broker_main
+        sys.argv.pop(1)
+        broker_main()
+        return
+    if len(sys.argv) > 1:
+        from .broker_cli import route_if_enabled
+        if route_if_enabled(sys.argv[1:]):
+            return
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("banto: Budget-gated API key vault for LLM applications\n")
         print("Usage: banto <command> [args]\n")
         print("Commands:")
+        print("  broker <cmd>        Common Keychain process: install, health, enable, call")
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
         print("  profile [name]      Show or set the active model profile")
