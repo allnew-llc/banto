@@ -208,3 +208,16 @@ def test_cli_register_routes_and_export_denied(tmp_path, monkeypatch, capsys):
     call.assert_called_once_with("banto_register_key", provider="openai")
     with pytest.raises(SystemExit, match="disabled"):
         broker_cli.route_if_enabled(["sync", "export"])
+
+
+def test_install_starts_service_and_verifies_readiness(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(broker.sys, "platform", "darwin")
+    run = Mock(return_value=Mock(returncode=0))
+    monkeypatch.setattr(broker.subprocess, "run", run)
+    health = Mock(return_value={"status": "ready"})
+    monkeypatch.setattr(BrokerClient, "call", health)
+    broker.install()
+    assert run.call_args_list[0].args[0][1] == "bootstrap"
+    assert run.call_args_list[1].args[0][1] == "kickstart"
+    health.assert_called_once_with("health")

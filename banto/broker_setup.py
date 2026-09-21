@@ -60,7 +60,7 @@ def toml_update(text: str, command: str) -> str:
     return result
 
 
-def plan(home: Path, workspace: Path, command: Path) -> dict[Path, str]:
+def plan(home: Path, workspace: Path, command: Path, *, claude_config_dir: Path | None = None) -> dict[Path, str]:
     if not command.is_absolute():
         raise ValueError("launcher must be absolute")
     entry = {"command": str(command), "args": []}
@@ -68,14 +68,18 @@ def plan(home: Path, workspace: Path, command: Path) -> dict[Path, str]:
     json_paths = [workspace / "mcp/.mcp.json", workspace / ".gemini/settings.json",
                   workspace / "mcp_config.json", home / ".claude.json",
                   home / ".gemini/settings.json", home / ".gemini/antigravity/mcp_config.json"]
+    if claude_config_dir is not None:
+        json_paths.append(claude_config_dir / ".claude.json")
     for path in json_paths:
         old = path.read_text() if path.exists() else ""
         # Work on the resolved path so symlinked configs retain their aliases.
         changes[path.resolve()] = json_update(old, entry)
     path = home / ".codex/config.toml"
     changes[path.resolve()] = toml_update(path.read_text() if path.exists() else "", str(command))
-    for rel in (".codex/AGENTS.md", ".claude/CLAUDE.md", ".gemini/GEMINI.md"):
-        path = home / rel
+    rule_paths = [home / rel for rel in (".codex/AGENTS.md", ".claude/CLAUDE.md", ".gemini/GEMINI.md")]
+    if claude_config_dir is not None:
+        rule_paths.append(claude_config_dir / "CLAUDE.md")
+    for path in rule_paths:
         changes[path.resolve()] = update_rules(path.read_text() if path.exists() else "")
     return {path: text for path, text in changes.items() if not path.exists() or path.read_text() != text}
 
@@ -101,7 +105,9 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
-        changes = plan(Path.home(), args.workspace, args.launcher)
+        override = os.environ.get("CLAUDE_CONFIG_DIR")
+        claude_dir = Path(override).expanduser().resolve() if override else None
+        changes = plan(Path.home(), args.workspace, args.launcher, claude_config_dir=claude_dir)
         if args.apply:
             if not args.launcher.is_file() or not os.access(args.launcher, os.X_OK):
                 raise ValueError("launcher not executable")
