@@ -261,3 +261,23 @@ def test_diagnosis_real_worker_output_limit_is_supported_without_widening_envelo
     assert e.envelope('azure',body)[1]==12288
     body['max_output_tokens']=12289
     with pytest.raises(e.EvaluationError):e.envelope('azure',body)
+
+@pytest.mark.parametrize('change',['valid','route','kind','cognitive','source','publisher','model'])
+def test_foundry_actual_arm_metadata_preserves_exact_resource_endpoint_and_model(environment,change):
+    account={'id':e.AZURE_ID,'location':'eastus','kind':'AIServices','properties':{'provisioningState':'Succeeded',
+        'endpoint':'https://allnew-hontonotoko-ai.cognitiveservices.azure.com/',
+        'endpoints':{'OpenAI Language Model Instance API':e.AZURE_BASE+'/'}}}
+    deployment={'properties':{'provisioningState':'Succeeded','model':{'format':'OpenAI','name':'gpt-6-sol','version':'2026-09-22','publisher':None,'source':None,'sourceAccount':None,'callRateLimit':None}},'sku':{'name':'GlobalStandard','capacity':1000,'family':None}}
+    if change=='route':account['properties']['endpoints']['OpenAI Language Model Instance API']='https://attacker.invalid'
+    if change=='kind':account['kind']='Partner'
+    if change=='cognitive':account['properties']['endpoint']='https://other.cognitiveservices.azure.com/'
+    if change=='source':deployment['properties']['model']['source']='another-model'
+    if change=='publisher':deployment['properties']['model']['publisher']='partner'
+    if change=='model':deployment['properties']['model']['name']='gpt-6-astra'
+    with patch.object(e.Transport,'token',return_value='SYNTHETIC'),patch.object(e.Transport,'request',side_effect=[account,deployment]) as req:
+        if change=='valid':
+            result=e.azure_preflight();assert result['realModelCalls']==0 and result['endpoint']==e.AZURE_BASE
+            assert 'SYNTHETIC' not in json.dumps(result)
+        else:
+            with pytest.raises(e.EvaluationError):e.azure_preflight()
+        assert all(call.args[0]=='GET' for call in req.call_args_list)
