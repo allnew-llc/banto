@@ -7,6 +7,8 @@ No external dependencies beyond Python 3.10+ stdlib.
 """
 
 import json
+import math
+import stat
 import os
 import sys
 import threading
@@ -107,7 +109,9 @@ class CostGuard:
         config_path: str | None = None,
         caller: str = "unknown",
         data_dir: str | None = None,
+        strict_ledger: bool = False,
     ):
+        self.strict_ledger = strict_ledger
         self._lock = threading.Lock()
         self.caller = caller
         self.config_path = _resolve_config_path(config_path)
@@ -116,6 +120,10 @@ class CostGuard:
             config = json.load(f)
 
         self.monthly_limit_usd: float = config["monthly_limit_usd"]
+        if strict_ledger:
+            limits = [self.monthly_limit_usd, *config.get('provider_limits', {}).values(), *config.get('model_limits', {}).values()]
+            if any(type(v) not in (int,float) or not math.isfinite(v) or v < 0 for v in limits):
+                raise ValueError('strict_budget_limits_invalid')
         raw_timeout = config.get("hold_timeout_hours", 24)
         self.hold_timeout_hours: float = max(1, min(8760, raw_timeout))
 
@@ -167,14 +175,33 @@ class CostGuard:
             "entries": [],
         }
 
+    def _strict_usage(self, data: dict) -> None:
+        if not self.strict_ledger:
+            return
+        if not isinstance(data, dict) or not isinstance(data.get('entries'), list):
+            raise ValueError('strict_usage_invalid')
+        for row in data['entries']:
+            if not isinstance(row, dict) or type(row.get('cost_usd')) not in (int,float) or not math.isfinite(row['cost_usd']) or row['cost_usd'] < 0:
+                raise ValueError('strict_usage_invalid')
+
+    def _strict_path(self, path: Path) -> None:
+        if self.strict_ledger and path.exists():
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise ValueError('strict_usage_permissions_invalid')
+        if self.strict_ledger and path.is_symlink():
+            raise ValueError('strict_usage_permissions_invalid')
+
     def _load_usage(self) -> dict:
         """Load usage data (read-only, shared lock)."""
         usage_path = self._get_usage_file_path()
+        self._strict_path(usage_path)
         try:
             with open(usage_path, "r", encoding="utf-8") as f:
                 _lock_file(f, exclusive=False)
                 try:
                     data = json.load(f)
+                    self._strict_usage(data)
                     data["total_usd"] = round(max(0.0, sum(
                         e.get("cost_usd", 0) for e in data.get("entries", [])
                     )), 10)
@@ -185,6 +212,8 @@ class CostGuard:
         except FileNotFoundError:
             return self._create_empty_usage()
         except (json.JSONDecodeError, KeyError):
+            if self.strict_ledger:
+                raise ValueError('strict_usage_invalid') from None
             return self._create_empty_usage()
 
     def _void_stale_holds(self, data: dict) -> list[dict]:
@@ -196,7 +225,7 @@ class CostGuard:
         now = datetime.now(timezone.utc)
         voided = []
         for entry in data.get("entries", []):
-            if entry.get("status") != "hold":
+            if entry.get("status") != "hold" or entry.get("durable") is True:
                 continue
             held_at = datetime.fromisoformat(entry["timestamp"])
             # Normalize naive timestamps (pre-UTC migration) to UTC
@@ -222,7 +251,10 @@ class CostGuard:
         usage_path = self._get_usage_file_path()
         usage_path.parent.mkdir(parents=True, exist_ok=True)
 
-        fd = os.open(str(usage_path), os.O_RDWR | os.O_CREAT, 0o640)
+        self._strict_path(usage_path)
+        existed = usage_path.exists()
+        flags = os.O_RDWR | os.O_CREAT | (getattr(os, 'O_NOFOLLOW', 0) if self.strict_ledger else 0)
+        fd = os.open(str(usage_path), flags, 0o600 if self.strict_ledger else 0o640)
         with open(fd, "r+", encoding="utf-8") as f:
             _lock_file(f, exclusive=True)
             try:
@@ -230,12 +262,15 @@ class CostGuard:
                 if content.strip():
                     try:
                         data = json.loads(content)
+                        self._strict_usage(data)
                         data["total_usd"] = round(max(0.0, sum(
                             e.get("cost_usd", 0)
                             for e in data.get("entries", [])
                         )), 10)
                         data["entry_count"] = len(data.get("entries", []))
                     except (json.JSONDecodeError, KeyError):
+                        if self.strict_ledger:
+                            raise ValueError('strict_usage_invalid') from None
                         backup = usage_path.with_suffix(".json.corrupted")
                         try:
                             backup.write_text(content, encoding="utf-8")
@@ -243,6 +278,8 @@ class CostGuard:
                             pass
                         data = self._create_empty_usage()
                 else:
+                    if self.strict_ledger and existed:
+                        raise ValueError('strict_usage_invalid')
                     data = self._create_empty_usage()
 
                 self._void_stale_holds(data)
@@ -266,6 +303,8 @@ class CostGuard:
                 f.seek(0)
                 f.truncate()
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
 
                 return result
             finally:
@@ -449,6 +488,7 @@ class CostGuard:
         size: str = "1024x1024",
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        durable: bool = False,
     ) -> str:
         """
         Check budget AND write a pessimistic hold entry.
@@ -531,6 +571,8 @@ class CostGuard:
                     "caller": self.caller,
                 })
 
+                if durable:
+                    usage["entries"][-1]["durable"] = True
                 return hold_id
 
             return self._update_usage(_do_hold)
