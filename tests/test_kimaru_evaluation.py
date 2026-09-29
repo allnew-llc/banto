@@ -218,3 +218,46 @@ def test_owner_policy_preparation_never_raises_a_zero_budget_or_overwrites_exist
     assert e.policy(directory)['candidate']==SHA
     for args in [('51.00',expiry,True,True),('50.00',expiry,False,True),('50.00',expiry,True,False),('NaN',expiry,True,True)]:
         with pytest.raises(e.EvaluationError):e.prepare(SHA,*args,_directory=directory,_guard=g)
+
+@pytest.mark.parametrize('change,expected',[
+    ('none',None),('metadata','FIXED_REGISTRATION'),('missing','REGISTRATION_REQUIRED'),
+    ('login','GOOGLE_LOGIN'),('project','PROJECT_MISMATCH'),('billing','BILLING_REQUIRED'),('model','MODEL_UNAVAILABLE')])
+def test_existing_gemini_preflight_has_fixed_project_billing_model_and_no_secret_returns(environment,monkeypatch,change,expected):
+    from types import SimpleNamespace
+    calls=[];key='AIza'+'S'*35
+    entry=SimpleNamespace(account=e.GEMINI_ACCOUNT if change!='metadata' else 'unrelated',env_name='GEMINI_API_KEY')
+    monkeypatch.setattr('banto.sync.config.SyncConfig.load',lambda:SimpleNamespace(keychain_service='synthetic-service',secrets={'gemini-api-key':entry}))
+    class Store:
+        def __init__(self,service_prefix):assert service_prefix=='synthetic-service'
+        def get(self,account):
+            calls.append(('key',account));assert account==e.GEMINI_ACCOUNT
+            return None if change=='missing' else key
+    monkeypatch.setattr('banto.keychain.KeychainStore',Store)
+    monkeypatch.setattr('shutil.which',lambda _: '/synthetic/gcloud')
+    def token(args,**kwargs):
+        assert key not in str(args) and key not in str(kwargs)
+        assert args==['/synthetic/gcloud','auth','print-access-token','--account','allnew.work2018@gmail.com','--quiet']
+        return SimpleNamespace(returncode=1 if change=='login' else 0,stdout='synthetic-token')
+    monkeypatch.setattr(e.subprocess,'run',token)
+    def request(self,method,url,headers,payload=None):
+        assert method=='GET' and payload is None
+        calls.append(('get',url.split('?')[0]))
+        if 'lookupKey?' in url:return {'parent':'projects/'+('000' if change=='project' else e.GEMINI_PROJECT_NUMBER)+'/locations/global'}
+        if 'billingInfo' in url:return {'projectId':e.GEMINI_PROJECT,'billingEnabled':change!='billing'}
+        return {'name':'models/'+e.GEMINI_MODEL,'supportedGenerationMethods':[] if change=='model' else ['generateContent']}
+    monkeypatch.setattr(e.Transport,'request',request)
+    if expected:
+        with pytest.raises(e.EvaluationError,match=expected):e.preflight()
+    else:
+        result=e.preflight();assert result['keyValid'] and result['billingEnabled'] and result['realModelCalls']==0
+        assert key not in json.dumps(result) and 'synthetic-token' not in json.dumps(result)
+        assert len(calls)==4
+    if change=='metadata':assert calls==[]
+    if change=='project':assert len(calls)==2
+    if change=='billing':assert len(calls)==3
+
+def test_diagnosis_real_worker_output_limit_is_supported_without_widening_envelope():
+    body=payload();body['max_output_tokens']=12288
+    assert e.envelope('azure',body)[1]==12288
+    body['max_output_tokens']=12289
+    with pytest.raises(e.EvaluationError):e.envelope('azure',body)
