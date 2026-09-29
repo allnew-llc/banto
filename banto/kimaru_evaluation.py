@@ -26,6 +26,10 @@ CASES = tuple(c + '-' + p for c in ('office','retail','travel') for p in ('guide
 SUBSCRIPTION = '49805a83-6ad1-489f-886d-891dbf12a2fc'
 AZURE_BASE = 'https://allnew-hontonotoko-ai.openai.azure.com'
 AZURE_ID = '/subscriptions/'+SUBSCRIPTION+'/resourceGroups/rg-hontonotoko-ai/providers/Microsoft.CognitiveServices/accounts/allnew-hontonotoko-ai'
+GEMINI_PROJECT = 'gen-lang-client-0469915824'
+GEMINI_PROJECT_NUMBER = '402783811468'
+GEMINI_ACCOUNT = 'claude-mcp-gemini'
+MAX_OUTPUT = 12288
 GEMINI_MODEL = 'gemini-3.8-flash'
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent'
 PROVIDERS = {'azure': ('gpt-6-sol', 'azure_openai'), 'gemini': (GEMINI_MODEL, 'google')}
@@ -90,7 +94,7 @@ class Ledger:
                     or not re.fullmatch('[a-f0-9]{64}',row['payloadHash']) or not re.fullmatch('h_[a-f0-9]{12}',row['holdId'])
                     or row['state'] not in ('RESERVED','SETTLED')
                     or any(type(row[k])!=int or row[k]<=0 for k in ('inputLimit','outputLimit'))
-                    or row['outputLimit']>12000 or row['inputLimit']>650000):
+                    or row['outputLimit']>MAX_OUTPUT or row['inputLimit']>650000):
                     raise EvaluationError('R0_LEDGER_INVALID')
                 ids.add(row['requestId'])
                 maximum=cost(row['inputLimit'],row['outputLimit'])
@@ -152,7 +156,7 @@ def envelope(provider,payload):
             if not isinstance(part,dict) or set(part)-{'role','parts'} or ('role' in part and part['role']!='user') or not isinstance(part.get('parts'),list) or len(part['parts'])!=1 or set(part['parts'][0])!={'text'} or not isinstance(part['parts'][0]['text'],str): raise EvaluationError('R0_TEXT_ONLY_REQUIRED')
         if len(payload['contents'])!=1: raise EvaluationError('R0_TEXT_ONLY_REQUIRED')
     i=len(canonical(payload))+4096
-    if type(o)!=int or not 1<=o<=12000 or i>650000: raise EvaluationError('R0_TOKEN_LIMIT_INVALID')
+    if type(o)!=int or not 1<=o<=MAX_OUTPUT or i>650000: raise EvaluationError('R0_TOKEN_LIMIT_INVALID')
     return i,o
 
 def usage(provider,result,i,o):
@@ -208,11 +212,43 @@ class Transport:
                 or type(deployment.get('sku',{}).get('capacity'))!=int or deployment['sku']['capacity']<=0): raise EvaluationError('R0_AZURE_DEPLOYMENT_MISMATCH')
             self.credentials[provider]={'Authorization':'Bearer '+self.token('https://ai.azure.com/')}
         else:
-            from .keychain import KeychainStore
-            from .sync.config import SyncConfig
-            value=KeychainStore(service_prefix=SyncConfig.load().keychain_service).get('kimaru-staging-gemini-api-key')
-            if not isinstance(value,str) or not re.fullmatch('AIza[A-Za-z0-9_-]{26,196}',value): raise EvaluationError('R0_GEMINI_REGISTRATION_REQUIRED')
-            observe_secret(value);self.credentials[provider]={'x-goog-api-key':value}
+            self.gemini_preflight()
+    def gemini_preflight(self):
+        from .broker import observe_secret
+        from .keychain import KeychainStore
+        from .sync.config import SyncConfig
+        import shutil
+        from urllib.parse import urlencode
+        config=SyncConfig.load()
+        entry=config.secrets.get('gemini-api-key')
+        if entry is None or entry.account!=GEMINI_ACCOUNT or entry.env_name!='GEMINI_API_KEY':
+            raise EvaluationError('R0_GEMINI_FIXED_REGISTRATION_REQUIRED')
+        value=KeychainStore(service_prefix=config.keychain_service).get(GEMINI_ACCOUNT)
+        if not isinstance(value,str) or not re.fullmatch('AIza[A-Za-z0-9_-]{26,196}',value):
+            raise EvaluationError('R0_GEMINI_REGISTRATION_REQUIRED')
+        observe_secret(value)
+        gcloud=shutil.which('gcloud')
+        if not gcloud:raise EvaluationError('R0_OWNER_GOOGLE_LOGIN_REQUIRED')
+        safe={k:v for k,v in os.environ.items() if k in ('PATH','HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR')}
+        result=subprocess.run([gcloud,'auth','print-access-token','--account','allnew.work2018@gmail.com','--quiet'],capture_output=True,text=True,timeout=30,env=safe)
+        token=result.stdout.strip()
+        if result.returncode or not token or len(token)>16384:raise EvaluationError('R0_OWNER_GOOGLE_LOGIN_REQUIRED')
+        observe_secret(token);auth={'Authorization':'Bearer '+token}
+        # The key stays inside this service, including the fixed Google lookup URL.
+        # No argv/env/keyString/URL or provider body is returned to the caller/log.
+        lookup=self.request('GET','https://apikeys.googleapis.com/v2/keys:lookupKey?'+urlencode({'keyString':value}),auth)
+        if lookup.get('parent')!='projects/'+GEMINI_PROJECT_NUMBER+'/locations/global':
+            raise EvaluationError('R0_GEMINI_PROJECT_MISMATCH')
+        billing=self.request('GET','https://cloudbilling.googleapis.com/v1/projects/'+GEMINI_PROJECT+'/billingInfo',auth)
+        if billing.get('projectId')!=GEMINI_PROJECT or billing.get('billingEnabled') is not True:
+            raise EvaluationError('R0_GEMINI_BILLING_REQUIRED')
+        headers={'x-goog-api-key':value}
+        model=self.request('GET','https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL,headers)
+        if model.get('name')!='models/'+GEMINI_MODEL or 'generateContent' not in model.get('supportedGenerationMethods',[]):
+            raise EvaluationError('R0_GEMINI_MODEL_UNAVAILABLE')
+        self.credentials['gemini']=headers
+        return dict(projectId=GEMINI_PROJECT,projectNumber=GEMINI_PROJECT_NUMBER,billingEnabled=True,
+                    model=GEMINI_MODEL,keyValid=True,secretReturned=False,realModelCalls=0)
     def send(self,provider,payload):
         return self.request('POST',AZURE_BASE+'/openai/v1/responses' if provider=='azure' else GEMINI_URL,self.credentials[provider],payload)
 
@@ -295,3 +331,12 @@ def generate(provider,payload,request_id,case_id,candidate_sha,*,_directory=None
                 usage=u,reservationCeilingUsd=row['upperBoundUsd'],pricingStatus='CONSERVATIVE_CEILING_NOT_INVOICE',response=result)
     except EvaluationError: raise
     except Exception: raise EvaluationError('R0_FAILED_OR_UNKNOWN') from None
+
+
+def preflight():
+    from .broker import require_service,IN_SERVICE
+    require_service()
+    if not IN_SERVICE:raise EvaluationError('R0_COMMON_BROKER_REQUIRED')
+    try:return Transport().gemini_preflight()
+    except EvaluationError:raise
+    except Exception:raise EvaluationError('R0_PREFLIGHT_FAILED') from None

@@ -116,6 +116,9 @@ def redact(value, values: set[str]):
 
 
 def _dispatch(operation: str, arguments: dict) -> dict:
+    if operation == "kimaru_evaluation_preflight" and not arguments:
+        from .kimaru_evaluation import preflight
+        return preflight()
     if operation == "kimaru_evaluation_capabilities" and not arguments:
         from .kimaru_evaluation import capabilities
         return capabilities()
