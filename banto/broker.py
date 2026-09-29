@@ -116,6 +116,9 @@ def redact(value, values: set[str]):
 
 
 def _dispatch(operation: str, arguments: dict) -> dict:
+    if operation == "clienta_evaluation_azure_preflight" and not arguments:
+        from .clienta_evaluation import azure_preflight
+        return azure_preflight()
     if operation == "clienta_evaluation_preflight" and not arguments:
         from .clienta_evaluation import preflight
         return preflight()
