@@ -204,10 +204,11 @@ class Transport:
             arm={'Authorization':'Bearer '+self.token('https://management.azure.com/')}
             account=self.request('GET','https://management.azure.com'+AZURE_ID+'?api-version=2025-06-01',arm)
             deployment=self.request('GET','https://management.azure.com'+AZURE_ID+'/deployments/gpt-6-sol?api-version=2025-06-01',arm)
-            if (account.get('id','').lower()!=AZURE_ID.lower() or account.get('location')!='eastus' or account.get('kind')!='OpenAI'
-                or account.get('properties',{}).get('endpoint','').rstrip('/')!=AZURE_BASE
+            if (account.get('id','').lower()!=AZURE_ID.lower() or account.get('location')!='eastus' or account.get('kind') not in ('OpenAI','AIServices')
+                or not azure_route(account)
                 or account.get('properties',{}).get('provisioningState')!='Succeeded'
-                or deployment.get('properties',{}).get('model')!={'format':'OpenAI','name':'gpt-6-sol','version':'2026-09-22'}
+                or any(deployment.get('properties',{}).get('model',{}).get(k)!=v for k,v in {'format':'OpenAI','name':'gpt-6-sol','version':'2026-09-22'}.items())
+                or any(deployment.get('properties',{}).get('model',{}).get(k) is not None for k in ('publisher','source','sourceAccount'))
                 or deployment.get('properties',{}).get('provisioningState')!='Succeeded' or deployment.get('sku',{}).get('name')!='GlobalStandard'
                 or type(deployment.get('sku',{}).get('capacity'))!=int or deployment['sku']['capacity']<=0): raise EvaluationError('R0_AZURE_DEPLOYMENT_MISMATCH')
             self.credentials[provider]={'Authorization':'Bearer '+self.token('https://ai.azure.com/')}
@@ -340,3 +341,22 @@ def preflight():
     try:return Transport().gemini_preflight()
     except EvaluationError:raise
     except Exception:raise EvaluationError('R0_PREFLIGHT_FAILED') from None
+
+
+def azure_route(account):
+    properties=account.get('properties',{})
+    if account.get('kind')=='OpenAI':return properties.get('endpoint','').rstrip('/')==AZURE_BASE
+    return (account.get('kind')=='AIServices'
+        and properties.get('endpoint','').rstrip('/')=='https://allnew-hontonotoko-ai.cognitiveservices.azure.com'
+        and properties.get('endpoints',{}).get('OpenAI Language Model Instance API','').rstrip('/')==AZURE_BASE)
+
+
+def azure_preflight():
+    from .broker import require_service,IN_SERVICE
+    require_service()
+    if not IN_SERVICE:raise EvaluationError('R0_COMMON_BROKER_REQUIRED')
+    try:
+        Transport().prepare('azure')
+        return dict(resourceId=AZURE_ID,endpoint=AZURE_BASE,region='eastus',model='gpt-6-sol',version='2026-09-22',sku='GlobalStandard',secretReturned=False,realModelCalls=0)
+    except EvaluationError:raise
+    except Exception:raise EvaluationError('R0_AZURE_PREFLIGHT_FAILED') from None

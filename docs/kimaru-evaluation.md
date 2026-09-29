@@ -39,3 +39,7 @@ fake provider、private temporary policy/ledger、Unix socketで、ゼロ予算�
 `BrokerClient().call('kimaru_evaluation_preflight')`はservice-only。任意引数・キー値の返却・別account/projectへのfallbackはない。固定登録/所属プロジェクト/billingEnabled/modelのいずれかが不明・不一致なら停止。本文・生成・課金POSTは0件。API keys lookupはGoogle公式の所属確認GETを使う。通常のproviderエラー本文やURLを出力しない。[公式仕様](https://docs.cloud.google.com/api-keys/docs/get-info-api-keys)。
 
 既存DiagnosisGeneratorの上限12288に合わせ、1送信の出力最大を12288へ修正。case/batch予算・180k出力/800k合計/40callの上限は維持。preflightと上限境界のfake検証8件を追加、従来回帰を合わせ89件成功。
+
+## Foundryの実ARM表示への対応
+
+実アカウントはkind=AIServicesで、汎用endpointは固定cognitiveservices host、OpenAIのendpointはproperties.endpointsのOpenAI Language Model Instance APIに表示される。固定resource ID/eastus/両endpointを照合し、部署や任意hostへのfallbackはしない。model metadataのnull拡張列を許容し、format/name/versionとpublisher/source/sourceAccountのnullを照合する。read-only `kimaru_evaluation_azure_preflight`も追加。実POST前の初回失敗はledger0件/予算usage0を確認済み。fake境界7件を追加して計96件成功。
