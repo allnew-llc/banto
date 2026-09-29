@@ -43,3 +43,7 @@ fake provider、private temporary policy/ledger、Unix socketで、ゼロ予算�
 ## Foundryの実ARM表示への対応
 
 実アカウントはkind=AIServicesで、汎用endpointは固定cognitiveservices host、OpenAIのendpointはproperties.endpointsのOpenAI Language Model Instance APIに表示される。固定resource ID/eastus/両endpointを照合し、部署や任意hostへのfallbackはしない。model metadataのnull拡張列を許容し、format/name/versionとpublisher/source/sourceAccountのnullを照合する。read-only `kimaru_evaluation_azure_preflight`も追加。実POST前の初回失敗はledger0件/予算usage0を確認済み。fake境界7件を追加して計96件成功。
+
+## 送信失敗の診断
+
+Azure preflightは固定OpenAI routeのGET /openai/v1/modelsも確認し、Entra data-plane認証とSol metadataを照合する。生成POSTは行わない。HTTP errorは本文・token・URLを捨て、HTTP番号だけを固定codeで返す。番号だけで課金なしを断定せず、生成の予約は維持。モデル要求後の未確認結果をschema修正や権限修正のために盲目的再送しない。追加5件を含む101 tests passed。
