@@ -116,6 +116,19 @@ def redact(value, values: set[str]):
 
 
 def _dispatch(operation: str, arguments: dict) -> dict:
+    if operation == "kimaru_evaluation_capabilities" and not arguments:
+        from .kimaru_evaluation import capabilities
+        return capabilities()
+    if operation == "kimaru_evaluation_prepare":
+        if set(arguments) != {"candidate_sha", "limit_usd", "expires_at", "owner_confirm", "gemini_paid_tier_confirmed"}:
+            raise BrokerError("kimaru_evaluation_arguments_invalid")
+        from .kimaru_evaluation import prepare
+        return prepare(**arguments)
+    if operation == "kimaru_evaluation_generate":
+        if set(arguments) != {"provider", "payload", "request_id", "case_id", "candidate_sha"}:
+            raise BrokerError("kimaru_evaluation_arguments_invalid")
+        from .kimaru_evaluation import generate
+        return generate(**arguments)
     if operation == "kimaru_material_capabilities" and not arguments:
         from .kimaru_material import capabilities
         return capabilities()
