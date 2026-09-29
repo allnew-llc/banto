@@ -196,7 +196,9 @@ class Transport:
             if len(raw)>2000000: raise EvaluationError('R0_RESPONSE_TOO_LARGE')
             return json.loads(raw)
         except urllib.error.HTTPError as error:
-            error.close();raise EvaluationError('R0_REMOTE_FAILED_OR_UNKNOWN') from None
+            status=error.code;error.close()
+            if type(status)!=int or not 400<=status<=599:raise EvaluationError('R0_REMOTE_FAILED_OR_UNKNOWN') from None
+            raise EvaluationError('R0_REMOTE_HTTP_'+str(status)+'_OUTCOME_UNKNOWN') from None
         except (OSError,ValueError): raise EvaluationError('R0_REMOTE_FAILED_OR_UNKNOWN') from None
     def prepare(self,provider):
         from .broker import observe_secret
@@ -356,7 +358,10 @@ def azure_preflight():
     require_service()
     if not IN_SERVICE:raise EvaluationError('R0_COMMON_BROKER_REQUIRED')
     try:
-        Transport().prepare('azure')
-        return dict(resourceId=AZURE_ID,endpoint=AZURE_BASE,region='eastus',model='gpt-6-sol',version='2026-09-22',sku='GlobalStandard',secretReturned=False,realModelCalls=0)
+        transport=Transport();transport.prepare('azure')
+        models=transport.request('GET',AZURE_BASE+'/openai/v1/models',transport.credentials['azure'])
+        if not isinstance(models.get('data'),list) or not any(m.get('id') in ('gpt-6-sol','gpt-6-sol-2026-09-22') for m in models['data'] if isinstance(m,dict)):
+            raise EvaluationError('R0_AZURE_DATA_PLANE_MODEL_UNAVAILABLE')
+        return dict(dataPlaneAuthenticated=True,resourceId=AZURE_ID,endpoint=AZURE_BASE,region='eastus',model='gpt-6-sol',version='2026-09-22',sku='GlobalStandard',secretReturned=False,realModelCalls=0)
     except EvaluationError:raise
     except Exception:raise EvaluationError('R0_AZURE_PREFLIGHT_FAILED') from None
