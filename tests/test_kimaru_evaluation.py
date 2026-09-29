@@ -274,10 +274,21 @@ def test_foundry_actual_arm_metadata_preserves_exact_resource_endpoint_and_model
     if change=='source':deployment['properties']['model']['source']='another-model'
     if change=='publisher':deployment['properties']['model']['publisher']='partner'
     if change=='model':deployment['properties']['model']['name']='gpt-6-astra'
-    with patch.object(e.Transport,'token',return_value='SYNTHETIC'),patch.object(e.Transport,'request',side_effect=[account,deployment]) as req:
+    with patch.object(e.Transport,'token',return_value='SYNTHETIC'),patch.object(e.Transport,'request',side_effect=[account,deployment,{'data':[{'id':'gpt-6-sol'}]}]) as req:
         if change=='valid':
             result=e.azure_preflight();assert result['realModelCalls']==0 and result['endpoint']==e.AZURE_BASE
             assert 'SYNTHETIC' not in json.dumps(result)
         else:
             with pytest.raises(e.EvaluationError):e.azure_preflight()
         assert all(call.args[0]=='GET' for call in req.call_args_list)
+
+@pytest.mark.parametrize('status',[400,401,403,429,500])
+def test_http_status_metadata_never_exposes_provider_body_token_or_url(status):
+    import io,urllib.error
+    key='SYNTHETIC-PRIVATE-KEY'
+    error=urllib.error.HTTPError('https://fixed.invalid?key='+key,status,key,{},io.BytesIO(key.encode()))
+    transport=e.Transport()
+    with patch.object(transport.opener,'open',side_effect=error):
+        with pytest.raises(e.EvaluationError) as failure:transport.request('GET','https://fixed.invalid',{'Authorization':key})
+        assert str(failure.value)=='R0_REMOTE_HTTP_'+str(status)+'_OUTCOME_UNKNOWN'
+        assert key not in str(failure.value) and 'https' not in str(failure.value)
