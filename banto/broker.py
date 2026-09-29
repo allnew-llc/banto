@@ -116,6 +116,14 @@ def redact(value, values: set[str]):
 
 
 def _dispatch(operation: str, arguments: dict) -> dict:
+    if operation == "kimaru_material_capabilities" and not arguments:
+        from .kimaru_material import capabilities
+        return capabilities()
+    if operation == "kimaru_material_provision":
+        if set(arguments) != {"environment", "purpose", "candidate_sha", "approved_region", "owner_confirm"}:
+            raise BrokerError("kimaru_material_arguments_invalid")
+        from .kimaru_material import provision
+        return provision(**arguments)
     if operation == "health" and not arguments:
         return {"status": "ready", "pid": os.getpid(), "python": sys.executable,
                 "python_realpath": str(Path(sys.executable).resolve()),
