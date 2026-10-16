@@ -306,6 +306,33 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 All commands support `--json` for machine-readable output.
 
+<details>
+<summary><strong>Broker commands</strong></summary>
+
+One local broker process performs Keychain operations. `banto broker call` runs an allowlisted operation and prints JSON. Results do not include secret values, and a stopped broker does not fall back to a direct Keychain read.
+
+| Command | Description |
+|---------|-------------|
+| `banto broker health` | Check that the broker is ready |
+| `banto broker install` | Install and start the user LaunchAgent |
+| `banto broker enable` | Require the broker for Keychain access |
+| `banto broker disable` | Allow direct Keychain access again |
+| `banto broker call <operation>` | Call an allowlisted operation. A terminal, empty stdin, or idle pipe means `{}` |
+| `banto broker call <operation> --args '<json>'` | Call with an explicit JSON object. Stdin is not read |
+
+```sh
+banto broker call banto_sync_status
+banto broker call pm_status
+banto broker call pm_api --args '{}'
+banto broker call banto_register_key --args '{"provider":"openai"}'
+printf '%s\n' '{"provider":"openai"}' | banto broker call banto_register_key
+banto broker call --help
+```
+
+`banto broker call --help` lists the operations this checkout's broker dispatch accepts, including prefix families such as `pm_*` (`pm_status`, `pm_api`). The running broker is what executes the call. A name outside those rules exits immediately with that list. Invalid JSON, or JSON that is not an object, exits immediately with the expected shape. `--args` is visible in the process list; keep secret values out of it. These operations do not take raw secret values. Piping a JSON object on stdin still works. Programs should keep using `BrokerClient.call`.
+
+</details>
+
 ## 🤖 MCP server
 
 banto exposes an MCP server so AI agents can orchestrate secret management. Agents never receive secret values — all tools return metadata only.
