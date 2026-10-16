@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import select
 import socket
 import socketserver
 import struct
@@ -36,6 +37,234 @@ MCP_OPERATIONS = (
     "banto_sealed_create_key", "banto_sealed_export_pubkey", "banto_sealed_sign",
     "banto_sealed_list",
 )
+# Names handled by _dispatch before the MCP_OPERATIONS membership check.
+# CLI help and unknown-operation errors read this; do not add secret-returning APIs.
+DISPATCH_OPERATIONS = (
+    "api_request",
+    "health",
+    "kimaru_evaluation_azure_preflight",
+    "kimaru_evaluation_capabilities",
+    "kimaru_evaluation_generate",
+    "kimaru_evaluation_preflight",
+    "kimaru_evaluation_prepare",
+    "kimaru_material_capabilities",
+    "kimaru_material_provision",
+    "register_asc",
+    "register_x_oauth",
+)
+# Agent shells often leave stdin open and never write. Wait briefly so a real
+# pipeline can deliver bytes, then continue with {} instead of blocking.
+CALL_STDIN_POLL_SECONDS = 0.2
+
+
+class BrokerUsageError(Exception):
+    """CLI usage failure. The message must not contain argument values or secrets."""
+
+
+def allowed_operations() -> tuple[str, ...]:
+    return tuple(sorted(set(DISPATCH_OPERATIONS).union(MCP_OPERATIONS)))
+
+
+def _json_kind(value: object) -> str:
+    # bool is a subclass of int; classify it before numbers.
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)):
+        return "number"
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
+def parse_arguments_json(raw: str, *, source: str) -> dict:
+    """Parse a JSON object. Errors omit the raw text so secrets cannot leak."""
+    example = '{} or {"provider":"openai"}'
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        raise BrokerUsageError(
+            f"Invalid JSON in {source}. Expected a JSON object such as {example}."
+        ) from None
+    if not isinstance(value, dict):
+        kind = _json_kind(value)
+        if kind == "null":
+            phrase = "null"
+        else:
+            article = "an" if kind[0] in "aeiou" else "a"
+            phrase = f"{article} {kind}"
+        raise BrokerUsageError(
+            f"Broker arguments from {source} must be a JSON object, not {phrase}."
+        )
+    return value
+
+
+def _stdin_has_data(stdin, timeout: float) -> bool:
+    """True when a read would not wait longer than timeout.
+
+    In-memory streams used by tests have no file descriptor; their buffer is
+    already complete. An idle pipe returns False.
+    """
+    try:
+        fileno = stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        return True
+    readable, _, _ = select.select([fileno], [], [], timeout)
+    return bool(readable)
+
+
+def load_call_arguments(stdin, args_json: str | None) -> dict:
+    """Resolve `broker call` arguments without blocking on an idle stdin.
+
+    `--args` is explicit and does not touch stdin. A terminal, empty stdin, or
+    a pipe that stays silent for CALL_STDIN_POLL_SECONDS means {}.
+    """
+    if args_json is not None:
+        if not args_json.strip():
+            raise BrokerUsageError(
+                "`--args` must be a JSON object, for example --args '{}'."
+            )
+        return parse_arguments_json(args_json, source="--args")
+    if stdin is None or stdin.isatty():
+        return {}
+    if not _stdin_has_data(stdin, CALL_STDIN_POLL_SECONDS):
+        return {}
+    try:
+        raw = stdin.read()
+    except UnicodeDecodeError:
+        raise BrokerUsageError(
+            "Broker arguments on stdin must be UTF-8 JSON text."
+        ) from None
+    if not raw or not str(raw).strip():
+        return {}
+    return parse_arguments_json(str(raw), source="stdin")
+
+
+def reject_unknown_operation(operation: str) -> None:
+    allowed = allowed_operations()
+    if operation in allowed:
+        return
+    shown = operation.replace("\n", " ").replace("\r", " ")
+    if len(shown) > 80:
+        shown = shown[:79] + "…"
+    listing = "\n".join(f"  {name}" for name in allowed)
+    raise BrokerUsageError(
+        f"Unknown broker operation {shown!r}.\nValid operations:\n{listing}"
+    )
+
+
+def call_usage_hint() -> str:
+    return (
+        "Usage: banto broker call <operation> [--args '<json>']\n"
+        "       printf '%s\\n' '<json>' | banto broker call <operation>\n"
+        "A terminal, empty stdin, or an idle pipe uses {}."
+    )
+
+
+def _call_epilog() -> str:
+    listing = "\n".join(f"  {name}" for name in allowed_operations())
+    return (
+        "examples:\n"
+        "  banto broker call banto_sync_status\n"
+        "  banto broker call banto_register_key "
+        "--args '{\"provider\":\"openai\"}'\n"
+        "  printf '%s\\n' '{\"max_age_days\":7}' "
+        "| banto broker call banto_sync_audit\n"
+        "\n"
+        "operations:\n"
+        f"{listing}"
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="banto broker",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  banto broker health\n"
+            "  banto broker call banto_budget_status\n"
+            "  banto broker call banto_register_key "
+            "--args '{\"provider\":\"openai\"}'\n"
+            "  printf '%s\\n' '{\"provider\":\"openai\"}' "
+            "| banto broker call banto_register_key"
+        ),
+    )
+    commands = parser.add_subparsers(dest="command", metavar="command", required=True)
+    commands.add_parser("serve", help="Run the broker process (LaunchAgent entrypoint)")
+    commands.add_parser("install", help="Install and start the user LaunchAgent")
+    commands.add_parser(
+        "health", help="Check broker readiness (does not read Keychain)",
+    )
+    commands.add_parser(
+        "enable", help="Require the broker and refuse direct Keychain access",
+    )
+    commands.add_parser(
+        "disable", help="Allow direct Keychain access again; restart MCP clients",
+    )
+    call = commands.add_parser(
+        "call",
+        help="Call one allowlisted operation",
+        description=(
+            "Call one allowlisted operation. Arguments are a JSON object passed\n"
+            "with --args or piped on stdin. A terminal, empty stdin, or an idle\n"
+            "pipe means {}, so operations with no arguments return immediately.\n"
+            "Unknown names and invalid JSON fail before any broker call.\n"
+            "--args is visible in the process list. Allowlisted operations do not\n"
+            "take secret values and never return them."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_call_epilog(),
+    )
+    call.add_argument("operation", help="Allowlisted operation name")
+    call.add_argument(
+        "--args",
+        dest="args_json",
+        metavar="JSON",
+        help=(
+            "JSON object of arguments. When set, stdin is not read. "
+            "Example: --args '{\"provider\":\"openai\"}'"
+        ),
+    )
+    return parser
+
+
+def _run_command(args: argparse.Namespace) -> None:
+    if args.command == "serve":
+        # -m executes this file as __main__; use the canonical module so
+        # Keychain's guard sees the same IN_SERVICE flag.
+        from . import broker
+        broker.serve()
+        return
+    if args.command == "install":
+        install()
+        return
+    if args.command == "enable":
+        BrokerClient().call("health")
+        (runtime_dir() / "required").touch(mode=0o600)
+        print('{"direct_banto_access_blocked": true}')
+        return
+    if args.command == "disable":
+        (runtime_dir() / "required").unlink(missing_ok=True)
+        print('{"direct_banto_access_blocked": false, "restart_mcp_clients": true}')
+        return
+    if args.command == "health":
+        print(json.dumps(BrokerClient().call("health"), ensure_ascii=False))
+        return
+    if args.command == "call":
+        # Reject before reading stdin so a typo cannot block on an idle pipe.
+        reject_unknown_operation(args.operation)
+        arguments = load_call_arguments(sys.stdin, args.args_json)
+        result = BrokerClient().call(args.operation, **arguments)
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    raise BrokerUsageError(f"Unknown broker command {args.command!r}.")
 
 
 def require_service() -> None:
@@ -279,34 +508,22 @@ def install() -> None:
     print(json.dumps({"installed": True, "plist": str(plist_path), "python": sys.executable}))
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["serve", "install", "health", "enable", "disable", "call"])
-    parser.add_argument("operation", nargs="?")
-    args = parser.parse_args()
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     try:
-        if args.command == "serve":
-            # -m executes this file as __main__; use the canonical module so
-            # Keychain's guard sees the same IN_SERVICE flag.
-            from . import broker
-            broker.serve()
-        elif args.command == "install":
-            install()
-        elif args.command == "enable":
-            BrokerClient().call("health")
-            (runtime_dir() / "required").touch(mode=0o600)
-            print('{"direct_banto_access_blocked": true}')
-        elif args.command == "disable":
-            (runtime_dir() / "required").unlink(missing_ok=True)
-            print('{"direct_banto_access_blocked": false, "restart_mcp_clients": true}')
-        else:
-            operation = "health" if args.command == "health" else args.operation
-            if not operation:
-                parser.error("call requires an operation; arguments are a JSON object on stdin")
-            arguments = {} if args.command == "health" else json.load(sys.stdin)
-            print(json.dumps(BrokerClient().call(operation, **arguments), ensure_ascii=False))
+        _run_command(args)
+    except BrokerUsageError as error:
+        print(f"banto broker: error: {error}", file=sys.stderr)
+        if getattr(args, "command", None) == "call":
+            print(call_usage_hint(), file=sys.stderr)
+        sys.exit(2)
     except (BrokerError, OSError, ValueError, TypeError):
-        print("Broker command failed; no direct Keychain fallback. Check service and operation arguments.", file=sys.stderr)
+        print(
+            "Broker command failed; no direct Keychain fallback. "
+            "Check service and operation arguments.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 

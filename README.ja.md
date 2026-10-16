@@ -302,6 +302,31 @@ banto budget --provider openai 30    # OpenAI $30/月
 
 すべてのコマンドで `--json` オプションによる機械可読出力に対応しています。
 
+<details>
+<summary><strong>Brokerコマンド</strong></summary>
+
+Keychainを扱うのはローカルのbrokerプロセスだけです。`banto broker call` は許可リストにある操作を実行し、JSONを表示します。結果に秘密値は含まれません。brokerが止まっているときは、Keychainを直接読む経路には戻りません。
+
+| コマンド | 説明 |
+|---------|------|
+| `banto broker health` | brokerが起動しているかを確認 |
+| `banto broker install` | ユーザーLaunchAgentをインストールして起動 |
+| `banto broker enable` | Keychainアクセスをbroker経由に限定 |
+| `banto broker disable` | 直接のKeychainアクセスを再び許可 |
+| `banto broker call <operation>` | 許可された操作を実行。ターミナル、空のstdin、入力が来ないパイプは `{}` |
+| `banto broker call <operation> --args '<json>'` | JSONオブジェクトを明示して実行。stdinは読まない |
+
+```sh
+banto broker call banto_sync_status
+banto broker call banto_register_key --args '{"provider":"openai"}'
+printf '%s\n' '{"provider":"openai"}' | banto broker call banto_register_key
+banto broker call --help
+```
+
+`banto broker call --help` に許可された操作の一覧が出ます。未知の操作名はその場で一覧を出して終了します。壊れたJSONや、オブジェクト以外のJSONも、接続前に期待する形を表示して終了します。`--args` はプロセス一覧から見えるため、秘密値は載せません。許可された操作は秘密値そのものを引数に取りません。stdinへJSONオブジェクトをパイプする使い方も引き続き使えます。プログラムからは `BrokerClient.call` を使います。
+
+</details>
+
 ## 🤖 MCPサーバー
 
 bantoはMCPサーバーを公開し、AIエージェントがシークレット管理を行えるようにします。エージェントがシークレット値を受け取ることはありません — すべてのツールはメタデータのみを返します。
