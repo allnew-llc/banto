@@ -24,6 +24,27 @@ LaunchAgent `work.allnew.banto.broker` がログイン時に起動します。�
 ソースはこのチェックアウトを使用するため、移動・削除・Python環境更新前にはサービスを停止してください。
 実行中プロセスへのコード変更は再起動後に反映されます。
 
+## CLIから操作を呼ぶ
+
+`banto broker call <operation>` は許可リストにある操作を1つ実行し、結果のJSONを表示します。
+秘密値を返す操作はありません。直接Keychainを読む経路へは戻りません。
+
+引数はJSONオブジェクトです。`--args` で渡すか、stdinへパイプします。
+ターミナル、空のstdin、データを送らないパイプは `{}` として扱い、すぐに実行します。
+未知の操作名は有効な一覧を出してすぐ終了します。壊れたJSONやオブジェクト以外も、接続前に理由を表示して終了します。
+
+```sh
+banto broker call banto_sync_status
+banto broker call banto_register_key --args '{"provider":"openai"}'
+printf '%s\n' '{"provider":"openai"}' | banto broker call banto_register_key
+banto broker --help
+banto broker call --help
+```
+
+`banto broker call --help` に許可された操作名と例が出ます。
+`--args` はプロセス一覧から見えるので、秘密値は載せません。許可された操作は秘密値を引数に取りません。
+stdinへJSONをパイプする既存の使い方もそのままです。プログラムからは `BrokerClient.call` を使います。
+
 既存のMCPクライアントは再起動が必要です。起動コマンドはリポジトリの
 `run-banto-mcp.sh`（絶対パス）に統一します。このスクリプトは実行のたびにuvでPythonを選び直しません。
 `banto-mcp` の既存エントリーポイントも、broker有効時には操作を転送します。

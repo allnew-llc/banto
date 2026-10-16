@@ -521,7 +521,10 @@ def main() -> None:
         print("banto: Budget-gated API key vault for LLM applications\n")
         print("Usage: banto <command> [args]\n")
         print("Commands:")
-        print("  broker <cmd>        Common Keychain process: install, health, enable, call")
+        print(
+            "  broker <cmd>        Common Keychain process: "
+            "install, health, enable, call <op> [--args JSON]"
+        )
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
         print("  profile [name]      Show or set the active model profile")
