@@ -32,9 +32,13 @@ LaunchAgent `work.allnew.banto.broker` がログイン時に起動します。�
 引数はJSONオブジェクトです。`--args` で渡すか、stdinへパイプします。
 ターミナル、空のstdin、データを送らないパイプは `{}` として扱い、すぐに実行します。
 未知の操作名は有効な一覧を出してすぐ終了します。壊れたJSONやオブジェクト以外も、接続前に理由を表示して終了します。
+受け付ける名前は `_dispatch` の規則から取ります。`operation == "register_asc"` のような個別名、`MCP_OPERATIONS`、`operation.startswith(...)` のプレフィックスです。
+`pm_*`（`pm_status`、`pm_api`）は、このリモートに `pm_local` がまだ無くても実行中の broker へ渡します。実行の可否は起動中の broker が決めます。
 
 ```sh
 banto broker call banto_sync_status
+banto broker call pm_status
+banto broker call pm_api --args '{}'
 banto broker call banto_register_key --args '{"provider":"openai"}'
 printf '%s\n' '{"provider":"openai"}' | banto broker call banto_register_key
 banto broker --help

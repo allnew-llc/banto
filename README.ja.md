@@ -318,12 +318,14 @@ Keychainを扱うのはローカルのbrokerプロセスだけです。`banto br
 
 ```sh
 banto broker call banto_sync_status
+banto broker call pm_status
+banto broker call pm_api --args '{}'
 banto broker call banto_register_key --args '{"provider":"openai"}'
 printf '%s\n' '{"provider":"openai"}' | banto broker call banto_register_key
 banto broker call --help
 ```
 
-`banto broker call --help` に許可された操作の一覧が出ます。未知の操作名はその場で一覧を出して終了します。壊れたJSONや、オブジェクト以外のJSONも、接続前に期待する形を表示して終了します。`--args` はプロセス一覧から見えるため、秘密値は載せません。許可された操作は秘密値そのものを引数に取りません。stdinへJSONオブジェクトをパイプする使い方も引き続き使えます。プログラムからは `BrokerClient.call` を使います。
+`banto broker call --help` には、このチェックアウトの broker が受け付ける操作が出ます。`pm_*`（`pm_status`、`pm_api`）のようなプレフィックスも含まれ、実行するのは起動中の broker です。その規則にない名前は、その場で一覧を出して終了します。壊れたJSONや、オブジェクト以外のJSONも、接続前に期待する形を表示して終了します。`--args` はプロセス一覧から見えるため、秘密値は載せません。これらの操作は秘密値そのものを引数に取りません。stdinへJSONオブジェクトをパイプする使い方も引き続き使えます。プログラムからは `BrokerClient.call` を使います。
 
 </details>
 

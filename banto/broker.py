@@ -6,6 +6,7 @@ deliberately no get-secret, arbitrary URL, shell, import, or environment API.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import contextvars
 import fcntl
@@ -14,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import select
 import socket
 import socketserver
@@ -37,32 +39,126 @@ MCP_OPERATIONS = (
     "banto_sealed_create_key", "banto_sealed_export_pubkey", "banto_sealed_sign",
     "banto_sealed_list",
 )
-# Names handled by _dispatch before the MCP_OPERATIONS membership check.
-# CLI help and unknown-operation errors read this; do not add secret-returning APIs.
-DISPATCH_OPERATIONS = (
-    "api_request",
-    "health",
-    "clienta_evaluation_azure_preflight",
-    "clienta_evaluation_capabilities",
-    "clienta_evaluation_generate",
-    "clienta_evaluation_preflight",
-    "clienta_evaluation_prepare",
-    "clienta_material_capabilities",
-    "clienta_material_provision",
-    "register_asc",
-    "register_x_oauth",
-)
 # Agent shells often leave stdin open and never write. Wait briefly so a real
 # pipeline can deliver bytes, then continue with {} instead of blocking.
 CALL_STDIN_POLL_SECONDS = 0.2
+# Families a running broker may dispatch even when this checkout's _dispatch
+# does not yet. The owner's service forwards pm_* to pm_local; that module is
+# not on any remote branch. The CLI must still pass those names through.
+# Do not add secret-returning prefixes here.
+FORWARDED_PREFIXES = ("pm_",)
+_OPERATION_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Lowercase start plus a small punctuation set. A raw secret usually fails this.
+_SAFE_BROKER_ERROR = re.compile(r"^[a-z][A-Za-z0-9_.,:;/+ ]{0,200}$")
 
 
 class BrokerUsageError(Exception):
     """CLI usage failure. The message must not contain argument values or secrets."""
 
 
+def _string_constants(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    return set()
+
+
+def _is_operation(node: ast.AST) -> bool:
+    return isinstance(node, ast.Name) and node.id == "operation"
+
+
+def _membership_names(node: ast.AST) -> set[str]:
+    """Names a `operation in ...` test accepts. MCP_OPERATIONS is the live tuple."""
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        found: set[str] = set()
+        for elt in node.elts:
+            found.update(_string_constants(elt))
+        return found
+    if isinstance(node, ast.Name) and node.id == "MCP_OPERATIONS":
+        return set(MCP_OPERATIONS)
+    return set()
+
+
+def _startswith_prefixes(node: ast.Call) -> set[str]:
+    if not node.args:
+        return set()
+    arg = node.args[0]
+    if isinstance(arg, (ast.Tuple, ast.List)):
+        found: set[str] = set()
+        for elt in arg.elts:
+            found.update(_string_constants(elt))
+        return found
+    return _string_constants(arg)
+
+
+def _acceptance_from_source(source: str) -> tuple[set[str], set[str]]:
+    """Exact names and prefixes `_dispatch` handles before operation_not_allowed.
+
+    Only comparisons and startswith calls on the name `operation` count, so
+    argument-key literals such as candidate_sha are ignored. `operation not in
+    MCP_OPERATIONS` contributes the MCP allowlist. A new exact operation or
+    `operation.startswith("gemini_notebook_")` in `_dispatch` is accepted by
+    the CLI without a second list.
+    """
+    names: set[str] = set()
+    prefixes: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare) and _is_operation(node.left):
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, ast.Eq):
+                    names.update(_string_constants(comparator))
+                elif isinstance(op, ast.In):
+                    names.update(_membership_names(comparator))
+                elif isinstance(op, ast.NotIn):
+                    mcp_list = (
+                        isinstance(comparator, ast.Name)
+                        and comparator.id == "MCP_OPERATIONS"
+                    )
+                    if mcp_list:
+                        names.update(MCP_OPERATIONS)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            func = node.func
+            if func.attr == "startswith" and _is_operation(func.value):
+                prefixes.update(_startswith_prefixes(node))
+    return names, prefixes
+
+
+def accepted_by_broker() -> tuple[frozenset[str], tuple[str, ...]]:
+    """Operations the CLI may forward. The running broker still enforces execution."""
+    try:
+        names, prefixes = _acceptance_from_source(inspect.getsource(_dispatch))
+    except (OSError, TypeError):
+        names, prefixes = set(), set()
+    names.update(MCP_OPERATIONS)
+    prefixes.update(FORWARDED_PREFIXES)
+    return frozenset(names), tuple(sorted(prefixes))
+
+
+def operation_accepted(operation: str) -> bool:
+    if not _OPERATION_NAME.fullmatch(operation or ""):
+        return False
+    names, prefixes = accepted_by_broker()
+    if operation in names:
+        return True
+    return any(operation.startswith(prefix) for prefix in prefixes)
+
+
 def allowed_operations() -> tuple[str, ...]:
-    return tuple(sorted(set(DISPATCH_OPERATIONS).union(MCP_OPERATIONS)))
+    """Exact operation names, plus `prefix*` lines for forwarded families."""
+    names, prefixes = accepted_by_broker()
+    exact = [name for name in sorted(names)]
+    families = [f"{prefix}*" for prefix in prefixes]
+    return tuple(exact + families)
+
+
+def public_broker_error(error: BaseException) -> str:
+    """Show broker status text. Anything that does not look like a status stays hidden."""
+    message = str(error).splitlines()[0].strip() if str(error) else ""
+    if not _SAFE_BROKER_ERROR.fullmatch(message):
+        return "operation_failed"
+    for token in re.split(r"[^A-Za-z0-9_]+", message):
+        if len(token) > 48:
+            return "operation_failed"
+    return message
 
 
 def _json_kind(value: object) -> str:
@@ -146,13 +242,12 @@ def load_call_arguments(stdin, args_json: str | None) -> dict:
 
 
 def reject_unknown_operation(operation: str) -> None:
-    allowed = allowed_operations()
-    if operation in allowed:
+    if operation_accepted(operation):
         return
     shown = operation.replace("\n", " ").replace("\r", " ")
     if len(shown) > 80:
         shown = shown[:79] + "…"
-    listing = "\n".join(f"  {name}" for name in allowed)
+    listing = "\n".join(f"  {name}" for name in allowed_operations())
     raise BrokerUsageError(
         f"Unknown broker operation {shown!r}.\nValid operations:\n{listing}"
     )
@@ -171,6 +266,8 @@ def _call_epilog() -> str:
     return (
         "examples:\n"
         "  banto broker call banto_sync_status\n"
+        "  banto broker call pm_status\n"
+        "  banto broker call pm_api --args '{}'\n"
         "  banto broker call banto_register_key "
         "--args '{\"provider\":\"openai\"}'\n"
         "  printf '%s\\n' '{\"max_age_days\":7}' "
@@ -212,11 +309,13 @@ def build_parser() -> argparse.ArgumentParser:
         "call",
         help="Call one allowlisted operation",
         description=(
-            "Call one allowlisted operation. Arguments are a JSON object passed\n"
-            "with --args or piped on stdin. A terminal, empty stdin, or an idle\n"
-            "pipe means {}, so operations with no arguments return immediately.\n"
-            "Unknown names and invalid JSON fail before any broker call.\n"
-            "--args is visible in the process list. Allowlisted operations do not\n"
+            "Call one operation the broker dispatch accepts. Arguments are a JSON\n"
+            "object passed with --args or piped on stdin. A terminal, empty stdin,\n"
+            "or an idle pipe means {}, so operations with no arguments return\n"
+            "immediately. Names are taken from _dispatch, including prefix families\n"
+            "such as pm_*. The running broker still accepts or rejects the call.\n"
+            "Names outside those rules fail before any broker call. Invalid JSON\n"
+            "does too. --args is visible in the process list. Operations do not\n"
             "take secret values and never return them."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -518,7 +617,17 @@ def main(argv: list[str] | None = None) -> None:
         if getattr(args, "command", None) == "call":
             print(call_usage_hint(), file=sys.stderr)
         sys.exit(2)
-    except (BrokerError, OSError, ValueError, TypeError):
+    except BrokerError as error:
+        # Status codes are safe to show. Other text is replaced so a broker
+        # error cannot echo a secret value.
+        print(f"banto broker: error: {public_broker_error(error)}", file=sys.stderr)
+        print(
+            "Broker command failed; no direct Keychain fallback. "
+            "Check service and operation arguments.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except (OSError, ValueError, TypeError):
         print(
             "Broker command failed; no direct Keychain fallback. "
             "Check service and operation arguments.",
