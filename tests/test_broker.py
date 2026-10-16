@@ -291,17 +291,50 @@ def _assert_broker_outcome(completed):
         assert b"Invalid JSON" not in completed.stderr
 
 
-def test_dispatch_operation_names_match_cli_allowlist():
+def test_cli_acceptance_follows_dispatch_rules():
     import inspect
+    names, prefixes = broker.accepted_by_broker()
     source = inspect.getsource(broker._dispatch)
-    for name in broker.DISPATCH_OPERATIONS:
-        assert f'"{name}"' in source
-    assert set(broker.MCP_OPERATIONS).isdisjoint(broker.DISPATCH_OPERATIONS)
-    assert set(broker.allowed_operations()) == (
-        set(broker.DISPATCH_OPERATIONS) | set(broker.MCP_OPERATIONS)
-    )
-    for blocked in ("get", "get_secret", "store", "export", "exec", "pm_status"):
-        assert blocked not in broker.allowed_operations()
+    for name in (
+        "health", "api_request", "register_asc", "register_x_oauth",
+        "kimaru_material_provision", "banto_sync_status", "banto_sealed_sign",
+    ):
+        assert name in names
+        assert f'"{name}"' in source or name in broker.MCP_OPERATIONS
+    assert "candidate_sha" not in names
+    assert "pm_" in prefixes
+    assert broker.operation_accepted("pm_status")
+    assert broker.operation_accepted("pm_api")
+    assert broker.operation_accepted("register_asc")
+    assert not broker.operation_accepted("not_a_real_operation")
+    for blocked in ("get", "get_secret", "store", "export", "exec"):
+        assert not broker.operation_accepted(blocked)
+        assert blocked not in names
+
+
+def test_dispatch_parser_reads_exact_names_and_prefixes():
+    source = """
+def _dispatch(operation, arguments):
+    if operation.startswith("pm_"):
+        return {}
+    if operation.startswith(("gemini_notebook_", "other_")):
+        return {}
+    if operation == "gemini_notebook_status":
+        return {}
+    if operation == "health":
+        return {}
+    if operation in ("register_asc", "register_x_oauth"):
+        return {}
+    if operation not in MCP_OPERATIONS:
+        raise RuntimeError("nope")
+    if set(arguments) != {"candidate_sha"}:
+        return {}
+"""
+    names, prefixes = broker._acceptance_from_source(source)
+    assert {"health", "register_asc", "register_x_oauth", "gemini_notebook_status"} <= names
+    assert "banto_sync_status" in names
+    assert "candidate_sha" not in names
+    assert prefixes == {"pm_", "gemini_notebook_", "other_"}
 
 
 def test_call_help_lists_usage_without_reading_stdin():
@@ -323,7 +356,11 @@ def test_call_help_lists_usage_without_reading_stdin():
     assert "operations:" in call_text
     listed = set(re.findall(r"^  ([A-Za-z0-9_]+)$", call_text, re.M))
     assert "banto_sync_status" in listed
-    for blocked in ("get", "get_secret", "store", "export", "exec", "pm_status"):
+    assert "register_asc" in listed
+    assert "pm_*" in call_text
+    assert "banto broker call pm_status" in call_text
+    assert "banto broker call pm_api" in call_text
+    for blocked in ("get", "get_secret", "store", "export", "exec"):
         assert blocked not in listed
 
     module_help = subprocess.run(
@@ -332,6 +369,7 @@ def test_call_help_lists_usage_without_reading_stdin():
     )
     assert module_help.returncode == 0
     assert "banto_budget_status" in module_help.stdout
+    assert "pm_*" in module_help.stdout
     assert "get_secret" not in module_help.stdout
 
 
@@ -470,27 +508,66 @@ def test_call_rejects_blank_args_flag(monkeypatch, capsys):
     call.assert_not_called()
 
 
+def test_call_forwards_pm_operations(monkeypatch, capsys):
+    call = Mock(return_value={"status": "fixture"})
+    monkeypatch.setattr(BrokerClient, "call", call)
+    monkeypatch.setattr(sys, "stdin", _TtyStdin(""))
+    broker.main(["call", "pm_status"])
+    call.assert_called_once_with("pm_status")
+    assert "fixture" in capsys.readouterr().out
+
+    call.reset_mock()
+    monkeypatch.setattr(sys, "stdin", _BoomStdin())
+    broker.main(["call", "pm_api", "--args", '{"path":"/status","limit":2}'])
+    call.assert_called_once_with("pm_api", path="/status", limit=2)
+
+
+def test_call_surfaces_safe_broker_error_and_hides_raw_text(monkeypatch, capsys):
+    secret = "SUPER_SECRET_VALUE_SHOULD_NOT_APPEAR"
+    monkeypatch.setattr(
+        BrokerClient, "call", Mock(side_effect=BrokerError("operation_not_allowed")),
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    with pytest.raises(SystemExit) as raised:
+        broker.main(["call", "pm_api", "--args", "{}"])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert "operation_not_allowed" in err
+    assert "no direct Keychain fallback" in err
+
+    monkeypatch.setattr(BrokerClient, "call", Mock(side_effect=BrokerError(secret)))
+    with pytest.raises(SystemExit) as raised:
+        broker.main(["call", "pm_status"])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert secret not in err
+    assert "operation_failed" in err
+
+
 def test_call_unknown_operation_lists_valid_names_without_stdin(monkeypatch, capsys):
     call = Mock(side_effect=AssertionError("broker must not be called"))
     monkeypatch.setattr(BrokerClient, "call", call)
     monkeypatch.setattr(sys, "stdin", _BoomStdin())
     with pytest.raises(SystemExit) as raised:
-        broker.main(["call", "pm_status"])
+        broker.main(["call", "not_a_real_operation"])
     assert raised.value.code == 2
     err = capsys.readouterr().err
-    assert "pm_status" in err
+    assert "not_a_real_operation" in err
     assert "Valid operations:" in err
     assert "banto_sync_status" in err
     assert "api_request" in err
+    assert "pm_*" in err
+    assert "register_asc" in err
     assert "get_secret" not in err
     assert "Usage:" in err
     call.assert_not_called()
 
-    completed = _run_holding_stdin(("call", "pm_status"))
+    completed = _run_holding_stdin(("call", "not_a_real_operation"))
     assert completed.returncode == 2
     text = completed.stderr.decode()
-    assert "pm_status" in text
+    assert "not_a_real_operation" in text
     assert "banto_budget_status" in text
+    assert "pm_*" in text
     assert "no direct Keychain fallback" not in text
 
 
