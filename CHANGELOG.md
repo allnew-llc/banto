@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.3.1 (2026-10-17)
+
+### Removed
+
+- An obsolete client-specific `banto sync` command stub (and its aliases) that only printed a pointer to `banto sync browser-issue`. Use `banto sync browser-issue <name> --recipe <recipe.json>` instead
+
+### Security
+
+- Dependency updates in `uv.lock`: PyJWT 2.15.1, anyio 4.15.1, cryptography 50.0.2, mcp 1.30.0, starlette 1.7.0/1.8.0, python-multipart 0.0.32 (fixes Dependabot alerts incl. two critical)
+
+### Changed
+
+- Repository history was rewritten to remove client-specific material; commit SHAs and the `v5.2.2`–`v5.3.0` tags changed (file contents of `main` were not affected). Re-clone existing checkouts
+
 ## 5.3.0 (2026-10-17)
 
 ### Added
