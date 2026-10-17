@@ -1,5 +1,46 @@
 # Changelog
 
+## 5.3.0 (2026-10-17)
+
+### Added
+
+- **Budgeted broker `api_request`**: with budget gating on, the broker no longer rejects generation calls. It requires `max_output_tokens` (OpenAI) / `max_tokens` (Anthropic), rejects models without a `per_token` price (`unpriced_model`), reserves the worst case as a durable hold before the call (`budget_exceeded` if it does not fit global/provider/model limits), and settles from the provider's reported usage (Anthropic cache tokens included). A 4xx releases the hold; network errors, timeouts and 5xx keep it (`upstream_failed_or_outcome_unknown`). Responses carry `banto_budget`
+- **Broker rate limit**: `broker.api_request_rpm` in `config.json` (default 30/min, `0` disables); over the limit returns `rate_limited; retry after Ns`
+- **Broker audit log**: every operation except `health` is appended to `audit.jsonl` (0600) in the broker runtime directory with metadata only (operation, result, error code, allow-listed provider/model/cost/token fields, argument names) and a SHA-256 hash chain that survives rotation. `banto broker audit [--tail N] [--verify]`
+- **Pricing freshness**: `pricing.json` has machine-readable `_updated` and per-entry `verified` dates; `banto status` (text and `--json` `pricing`) warns about entries older than 90 days and about profile models without a price
+- **Prices** (official pages, 2026-10-17): `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5` (the default profile models), `text-embedding-3-small`, `text-embedding-3-large`. OpenAI GPT-4.1/4o/o-series and `claude-sonnet-4-20250514` re-verified (unchanged). Image/video entries were not re-verified and keep their 2026-03-10 date
+- **Release automation**: `.github/workflows/release.yml` (tag `v*`: version check, tests, `uv build`, `twine check`, CycloneDX SBOM, build-provenance attestation, PyPI Trusted Publishing with PEP 740 attestations when the `PYPI_TRUSTED_PUBLISHING` repository variable is `true`, GitHub Release with artifacts)
+- CI: Python 3.14; all GitHub Actions pinned by commit SHA; Dependabot for Actions and uv
+- Drift tests: README/CLAUDE.md MCP tool tables vs `MCP_OPERATIONS`, README sync tables vs `SYNC_COMMANDS`, version consistency (pyproject, `__version__`, uv.lock, CHANGELOG)
+
+### Fixed
+
+- **Leases**: a failed revoke command no longer deletes the Keychain value or marks the lease revoked; it is recorded as `revoke_failed` (with error, attempt count and time), `lease revoke`/`lease cleanup` exit 1, and `cleanup` retries it. `$BANTO_LEASE_VALUE` in `--revoke-cmd` now works (run via `/bin/sh -c` with the value in the environment, never argv). Lease state writes are atomic and serialized with a lock file; `lease list` has no side effects and shows pending revocations; TTL must be 1 s – 7 days. MCP `banto_lease_cleanup` declares `openWorldHint: true` and reports `revoke_failed`
+- **`banto list`** read the wrong Keychain namespace (`banto` instead of the sync `keychain_service` used by `store`/`register`) and listed nothing when budgets were off
+- **`banto profile`** crashed when budgets were off and did not persist the selection; it now works without budgets and saves `active_profile` to `~/.config/banto/config.json`
+- **`banto budget` / `CostGuard.set_budget()`** could write into the installed package's `config.json`; the first write now creates the user config instead
+- **`banto check`** reported `BLOCKED` when budgets were off and ignored provider/model limits; it now reports `ALLOWED (budget disabled)` or applies all three limits (reporting the blocking scope), and exits 1 for unknown models
+- **`banto register-x-oauth`** (broker mode) routed to a popup that did not exist; the command now points to `banto sync x-oauth-authorize` and exits 2, and the broker rejects the operation
+
+### Removed
+
+- Client-specific code and documents that do not belong in the public package: the Kimaru evaluation/material broker operations (`kimaru_*`), the QuickTrust validator and `banto sync quicktrust-credential` wrapper (now a stub pointing to `banto sync browser-issue`), POIPOI rotation rules, and an internal Vercel rotation run log. Generic browser-recipe issuance covers the same flows. Note: these files remain in git history and in the 5.2.x sdists/wheels on PyPI
+
+### Documentation
+
+- README (EN/JA): local broker section (install from PyPI, broker-mode command restrictions, budgeted `api_request`, rate limit, audit log), 14 MCP tools / 16 in broker mode, corrected sync command table (31 commands incl. `x-oauth-authorize`, `x-oauth-user-token`), `register-asc`, `sealed`, `broker` commands, lease behaviour, CI badge instead of a static test count, removed the "no daemon" claim
+- CLAUDE.md: full tool table (14 + 2 broker tools); `banto lease get` prohibited for agents
+- docs/local-broker.md: PyPI install path, budget hold/settle behaviour, rate limit, audit log
+
+### Backfilled (shipped in 5.2.x without a CHANGELOG entry)
+
+- **Local broker** (`banto broker install|health|enable|disable|call`, `banto.broker_client.BrokerClient`, `banto-mcp` forwarding, `python -m banto.broker_setup` for Codex/Claude Code/Gemini CLI): one per-user LaunchAgent owns Keychain access over a peer-UID-checked Unix socket; broker mode makes direct Keychain paths fail closed; `api_request` for OpenAI Responses / Anthropic Messages without exposing keys
+- **Secure Enclave sealed signing**: `banto sealed create-key|export-pubkey|sign|verify|list|delete` and the four `banto_sealed_*` MCP tools (P-256, private keys never leave the enclave)
+- **X OAuth 2.0**: `banto sync x-oauth-authorize` (PKCE enrolment with exact scopes) and `banto sync x-oauth-user-token` (refresh-token rotation)
+- **App Store Connect**: `banto register-asc` popup for `.p8` API keys
+- **Browser-recipe issuance**: `banto sync browser-record|browser-issue|browser-revoke|browser-batch`, plus `import-keychain`, `cloudflare-account-token`, `stripe-webhook-endpoint`, `xai-api-key`, OpenAI service-account commands
+- Durable budget holds (`hold_budget(..., durable=True)`) that are not voided by `hold_timeout_hours`
+
 ## 5.2.4 (2026-10-17)
 
 ### Added
