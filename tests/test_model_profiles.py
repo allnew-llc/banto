@@ -410,7 +410,7 @@ class TestCLIProfile:
         with patch("banto.__main__.SecureVault", return_value=mock_vault):
             cmd_profile(["budget"])
 
-        mock_vault.set_profile.assert_called_once_with("budget")
+        mock_vault.set_profile.assert_called_once_with("budget", persist=True)
         captured = capsys.readouterr()
         assert "budget" in captured.out
 

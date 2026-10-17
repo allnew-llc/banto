@@ -14,8 +14,6 @@ def route_if_enabled(args: list[str]) -> bool:
         arguments = {"provider": args[1] if len(args) == 2 else ""}
     elif args in (["register-asc"], ["asc-register"]):
         operation = "register_asc"
-    elif args == ["register-x-oauth"]:
-        operation = "register_x_oauth"
     elif args[0] == "sync":
         if args[1:] == ["status"]:
             operation = "banto_sync_status"

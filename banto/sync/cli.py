@@ -2239,35 +2239,15 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
 
 
 def cmd_sync_quicktrust_credential(args: list[str]) -> None:
-    """Issue a QuickTrust dashboard credential through a browser recipe."""
-    if any(arg in {"-h", "--help"} for arg in args):
-        print(
-            "Usage: banto sync quicktrust-credential <name> --recipe <recipe.json> "
-            "[--profile-dir <dir>] [--headless] [--validate] "
-            "[--smoke '<command>' | --smoke-preset <name>] "
-            "[--revoke-recipe <recipe.json> --revoke-key-id <id>] "
-            "[--exposure-manifest <path>] [--dry-run] [--json]"
-        )
-        print()
-        print("Aliases: banto sync quicktrust-api-key, banto sync quicktrust-webhook-secret")
-        return
-
-    forwarded = list(args)
-    if "--allow-manual-cutover" not in forwarded:
-        forwarded.append("--allow-manual-cutover")
-    if "--profile-dir" not in forwarded:
-        forwarded.extend([
-            "--profile-dir",
-            str(
-                Path.home()
-                / ".local"
-                / "state"
-                / "banto"
-                / "browser-profiles"
-                / "quicktrust"
-            ),
-        ])
-    cmd_sync_browser_issue(forwarded)
+    """Removed in 5.3.0: provider-specific wrapper moved out of public banto."""
+    print(
+        "Error: 'banto sync quicktrust-credential' was removed in banto 5.3.0.\n"
+        "Use the generic command instead:\n"
+        "  banto sync browser-issue <name> --recipe <recipe.json> "
+        "[--allow-manual-cutover] [--profile-dir <dir>] ...",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def cmd_sync_cloudflare_account_token(args: list[str]) -> None:
@@ -4023,6 +4003,11 @@ SYNC_COMMANDS = {
     "ui": cmd_sync_ui,
 }
 
+# Kept only so old invocations print a pointer; not documented.
+REMOVED_SYNC_COMMANDS = frozenset({
+    "quicktrust-credential", "quicktrust-api-key", "quicktrust-webhook-secret",
+})
+
 
 def cmd_sync_dispatch(args: list[str]) -> None:
     """Dispatch banto sync <subcommand>."""
@@ -4051,7 +4036,6 @@ def cmd_sync_dispatch(args: list[str]) -> None:
         print("  browser-record <name> --start-url <url> --output <recipe.json>")
         print("  browser-issue <name> --recipe <recipe.json>")
         print("  browser-revoke <name> --recipe <recipe.json> --key-id <id>")
-        print("  quicktrust-credential <name> --recipe <recipe.json>")
         print("  cloudflare-account-token <name> --account-id <id> --policy-file <json>")
         print("  stripe-webhook-endpoint <name> --source-secret <secret> --url <https://...> --event <event>")
         print("  propagate <name>    Store + sync replacement value via common flow")

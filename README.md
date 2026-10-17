@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.4-0D3B66?style=flat-square" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
+  <a href="https://pypi.org/project/banto/"><img src="https://img.shields.io/pypi/v/banto?style=flat-square&color=0D3B66" alt="PyPI version"></a>
+  <img src="https://img.shields.io/badge/python-3.10%E2%80%933.14-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
-  <img src="https://img.shields.io/badge/497%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
+  <a href="https://github.com/allnew-llc/banto/actions/workflows/ci.yml"><img src="https://github.com/allnew-llc/banto/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/33%20drivers-0D3B66?style=flat-square&label=platforms" alt="platforms">
-  <img src="https://img.shields.io/badge/14%20tools-262626?style=flat-square&label=MCP" alt="mcp">
+  <img src="https://img.shields.io/badge/14%20tools%20(16%20via%20broker)-262626?style=flat-square&label=MCP" alt="mcp">
 </p>
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
@@ -77,6 +77,7 @@ graph LR
 - [⚡ Quick start](#-quick-start)
 - [💻 CLI reference](#-cli-reference)
 - [🤖 MCP server](#-mcp-server)
+- [🏠 Local broker](#-local-broker-optional)
 - [🔒 Security](#-security)
 - [🐍 Python API](#-python-api)
 - [🔌 Custom backends](#-custom-backends)
@@ -94,7 +95,8 @@ graph LR
 - **Drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches when your deployed secrets are out of date
 - **Budget guard** — optional hold/settle pattern for LLM cost control. No budget = no key. Global, per-provider, and per-model limits
 - **Dynamic leases** — acquire short-lived credentials with TTL, auto-revoke on expiry
-- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel). 14 tools (10 sync/validate/lease tools that return metadata only, plus 4 sealed-signing tools that return public keys/signatures — never secret values)
+- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel). 14 tools (10 sync/validate/lease tools that return metadata only, plus 4 sealed-signing tools that return public keys/signatures — never secret values); 16 in broker mode (adds `banto_api_request` and `banto_broker_health`)
+- **Local broker (optional, macOS)** — one per-user background process owns Keychain access; agents and scripts request operations over a Unix socket and never receive key values. Budgeted `api_request` reserves worst-case cost before calling OpenAI/Anthropic and settles from reported usage; per-minute rate limit; metadata-only hash-chained audit log
 - **Keychain-native storage** — macOS Security framework via ctypes; secret values never appear in process arguments
 - **Web dashboard** — localhost-only CRUD interface with CSRF protection (`banto sync ui`)
 - **Notifications** — Slack, Microsoft Teams, Datadog Events, PagerDuty
@@ -234,7 +236,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 ## 💻 CLI reference
 
 <details>
-<summary><strong>Core commands (10)</strong></summary>
+<summary><strong>Core commands (13)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -243,16 +245,21 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto profile [name]` | Show or set the active model profile (quality/balanced/budget) |
 | `banto store <provider>` | Store an API key in Keychain (terminal prompt) |
 | `banto register [provider]` | Open browser popup to store an API key |
+| `banto register-asc` | Open the App Store Connect (.p8 key) registration popup |
 | `banto delete <provider>` | Delete an API key from Keychain |
-| `banto list` | List stored keys and budget summary |
-| `banto check <model> ...` | Dry-run budget check (`--tokens`, `--n`, `--seconds`, `--quality`, `--size`) |
+| `banto list` | List stored keys (same Keychain namespace as `store`/`register`) and budget summary |
+| `banto check <model> ...` | Dry-run budget check against global, provider and model limits (`--tokens`, `--n`, `--seconds`, `--quality`, `--size`); `ALLOWED (budget disabled)` when budgets are off |
 | `banto init` | Copy default config to `~/.config/banto/` |
 | `banto version` | Print the installed version (`banto --version` / `banto -V` also work, including in broker mode) |
+| `banto sealed <cmd>` | Secure Enclave signing keys: `create-key`, `export-pubkey`, `sign`, `verify`, `list`, `delete` |
+| `banto broker <cmd>` | Local broker: `install`, `health`, `enable`, `disable`, `call`, `audit [--tail N] [--verify]` (see [Local broker](#-local-broker-optional)) |
+
+`banto profile <name>` persists the choice to `~/.config/banto/config.json`. `banto status` also warns when pricing entries are older than 90 days or when profile models have no price. There is no `banto register-x-oauth`: X OAuth 2.0 user tokens are enrolled with `banto sync x-oauth-authorize` (the command prints this pointer and exits 2).
 
 </details>
 
 <details>
-<summary><strong>Sync commands (26)</strong></summary>
+<summary><strong>Sync commands (31)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -270,11 +277,12 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto sync openai-service-accounts` | List OpenAI service accounts without exposing key values |
 | `banto sync openai-revoke-service-account` | Revoke an OpenAI service account |
 | `banto sync xai-api-key <name>` | Issue an xAI runtime API key using a management key |
+| `banto sync x-oauth-authorize <name>` | Enroll an exact-scope X OAuth 2.0 user-token pair with PKCE (local callback, values never printed) |
+| `banto sync x-oauth-user-token <name>` | Rotate an X OAuth 2.0 user-token pair with its refresh token |
 | `banto sync browser-batch <plan.json>` | Run multiple closed-loop browser rotations from one metadata-only plan |
 | `banto sync browser-record <name>` | Record a provider console flow into a reusable browser recipe without writing secret values |
 | `banto sync browser-issue <name>` | Issue a key through a local browser recipe, then store and sync without printing the value |
 | `banto sync browser-revoke <name>` | Revoke a browser-managed key by provider key id/label after replacement is live |
-| `banto sync quicktrust-credential <name>` | Issue a QuickTrust API key or webhook secret through a dashboard browser recipe |
 | `banto sync cloudflare-account-token <name>` | Issue a Cloudflare Account API token and propagate it without printing the value |
 | `banto sync stripe-webhook-endpoint <name>` | Create a Stripe webhook endpoint and propagate its signing secret |
 | `banto sync propagate <name>` | Store + sync a replacement value from a trusted local command |
@@ -295,10 +303,12 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | Command | Description |
 |---------|-------------|
 | `banto lease acquire <name>` | Acquire a short-lived credential (`--cmd`, `--revoke-cmd`, `--ttl`) |
-| `banto lease get <lease_id>` | Retrieve credential value (stdout, for piping) |
-| `banto lease revoke <lease_id>` | Explicitly revoke a lease |
-| `banto lease list` | Show active leases with remaining TTL |
-| `banto lease cleanup` | Revoke all expired leases |
+| `banto lease get <lease_id>` | Retrieve credential value (stdout, for piping). Prints a secret — never run it in an agent context |
+| `banto lease revoke <lease_id>` | Explicitly revoke a lease (exit 1 and `revoke_failed` status if the revoke command fails) |
+| `banto lease list` | Show active leases with remaining TTL and leases pending revocation |
+| `banto lease cleanup` | Revoke expired leases and retry failed revocations (exit 1 if any still fail) |
+
+TTL is limited to 1 second – 7 days. `--revoke-cmd` may reference `$BANTO_LEASE_VALUE`, which is passed via the environment (run through `/bin/sh -c`), never in argv. A lease value stays in Keychain until its revocation succeeds.
 
 </details>
 
@@ -311,7 +321,9 @@ banto budget --provider openai 30    # $30/month for OpenAI
 
 </details>
 
-All commands support `--json` for machine-readable output.
+In broker mode (`banto broker enable`), `store`, `delete`, `lease` and sync subcommands other than `status`, `audit`, `validate [--keychain]` and `push` are disabled; `register`, `register-asc` and those sync subcommands are routed through the broker.
+
+Most commands support `--json` for machine-readable output.
 
 ## 🤖 MCP server
 
@@ -374,8 +386,32 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 | `banto_sealed_export_pubkey` | Export a sealed key's public key | Read-only |
 | `banto_sealed_sign` | Sign a payload with a sealed key | Touch ID / passcode prompt (user-presence keys) |
 | `banto_sealed_list` | List sealed keys | Read-only |
+| `banto_api_request` | Broker mode only: OpenAI Responses / Anthropic Messages call without exposing the key | Incurs provider usage; budgeted, rate limited, audited |
+| `banto_broker_health` | Broker mode only: broker liveness | Read-only; never reads Keychain |
 
 All tools include OpenAI-compatible annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`).
+
+## 🏠 Local broker (optional)
+
+The broker is a per-user LaunchAgent (`work.allnew.banto.broker`) that is the only process reading Keychain. MCP clients (`banto-mcp` forwards automatically), the CLI and Python scripts (`banto.broker_client.BrokerClient`) send operations over a Unix socket (0600 in a 0700 directory, peer UID checked). No operation returns a secret value.
+
+```bash
+uv tool install "banto[mcp]"     # or pipx / pip; the broker needs the mcp extra
+banto broker install             # LaunchAgent with this interpreter's absolute path
+banto broker health              # PID and Python path only; no Keychain read
+banto broker enable              # broker mode: direct Keychain paths fail closed
+banto broker audit --verify      # verify the hash-chained audit log
+```
+
+After upgrading banto, restart the service: `launchctl kickstart -k gui/$(id -u)/work.allnew.banto.broker`. `banto broker disable` returns to direct mode. Details (Japanese): [docs/local-broker.md](./docs/local-broker.md).
+
+**`api_request`** (`BrokerClient().call("api_request", provider="openai"|"anthropic", payload={...})` or the `banto_api_request` MCP tool) makes non-streaming OpenAI Responses / Anthropic Messages calls. Destination, auth headers and redirects are fixed; remote tools and streaming are rejected. When budget gating is on:
+
+- the payload must set `max_output_tokens` (OpenAI) / `max_tokens` (Anthropic) and the model must have a `per_token` entry in `pricing.json` (`unpriced_model` otherwise);
+- the worst case (payload size as an input-token upper bound + max output) is reserved as a durable hold before the call (`budget_exceeded` if it does not fit), then settled from the provider's reported usage (`banto_budget` in the response);
+- a 4xx rejection releases the hold; network errors, timeouts and 5xx keep it (`upstream_failed_or_outcome_unknown`), because the provider may have billed. Kept holds are durable: they are not voided by `hold_timeout_hours` and count against the budget for the rest of the month (check the provider dashboard if one was not actually billed).
+
+Calls are limited to `broker.api_request_rpm` per minute (default 30, `0` disables). Every operation is appended to `audit.jsonl` in the broker runtime directory: timestamp, operation, result, error code, and allow-listed metadata (provider, model, status, costs, token counts, argument names) — never payloads or values. Each record carries the SHA-256 of the previous one.
 
 ## 🔒 Security
 
@@ -570,6 +606,7 @@ All config files live in `~/.config/banto/`. Run `banto init` to create defaults
 ```json
 {
   "monthly_limit_usd": 0,
+  "broker": {"api_request_rpm": 30},
   "providers": {
     "openai": {
       "models": ["gpt-4o", "dall-e-3", "sora-2"]
@@ -581,16 +618,18 @@ All config files live in `~/.config/banto/`. Run `banto init` to create defaults
 }
 ```
 
-Budget is in USD, enforced per calendar month. Default is `0` (budget disabled; keys returned without cost checks). Set a value to enable budget gating.
+Budget is in USD, enforced per calendar month. Default is `0` (budget disabled; keys returned without cost checks). Set a value to enable budget gating. `banto budget` / `CostGuard.set_budget()` write to `~/.config/banto/config.json` (created from the bundled default on first write), never into the installed package. `broker.api_request_rpm` limits broker `api_request` calls per minute.
 
 ### `pricing.json` — Model pricing table
 
 ```json
 {
+  "_updated": "2026-10-17",
   "gpt-4o": {
     "type": "per_token",
     "input_per_1k": 0.0025,
-    "output_per_1k": 0.01
+    "output_per_1k": 0.01,
+    "verified": "2026-10-17"
   },
   "dall-e-3": {
     "type": "per_image",
@@ -607,7 +646,7 @@ Budget is in USD, enforced per calendar month. Default is `0` (budget disabled; 
 }
 ```
 
-Prices are static. banto does not fetch pricing from provider APIs at runtime. Verify rates at each provider's official pricing page and update `pricing.json` accordingly.
+Prices are static. banto does not fetch pricing from provider APIs at runtime. Verify rates at each provider's official pricing page and update `pricing.json` accordingly. `verified` records when an entry was last checked (entries without it use `_updated`); `banto status` warns when entries are older than 90 days.
 
 ### `sync.json` — Multi-platform sync config
 
@@ -637,7 +676,7 @@ Created by `banto sync init`. Contains metadata only — no secret values.
 <details>
 <summary><strong>How often should I update pricing.json?</strong></summary>
 
-Check provider pricing pages monthly. banto does not fetch pricing at runtime — no major provider offers a public pricing API. When a provider changes rates, edit `~/.config/banto/pricing.json`. Incorrect rates mean inaccurate budget estimates, not security issues.
+Check provider pricing pages monthly; `banto status` warns once an entry's `verified` date is more than 90 days old. banto does not fetch pricing at runtime — no major provider offers a public pricing API. When a provider changes rates, edit `~/.config/banto/pricing.json`. Incorrect rates mean inaccurate budget estimates, not security issues.
 
 </details>
 
@@ -672,7 +711,7 @@ Yes. `SecureVault(budget=False)` returns keys directly without cost checks. Budg
 <details>
 <summary><strong>What's the performance overhead?</strong></summary>
 
-Negligible. banto runs entirely locally — Keychain access via ctypes is sub-millisecond, budget checks read a local JSON file with `fcntl` locking, and sync drivers call platform CLIs directly. There is no remote proxy, no daemon, and no network latency added to key retrieval.
+Negligible. banto runs entirely locally — Keychain access via ctypes is sub-millisecond, budget checks read a local JSON file with `fcntl` locking, and sync drivers call platform CLIs directly. There is no remote proxy and no network latency added to key retrieval. Without the broker, banto runs in-process; with the optional [local broker](#-local-broker-optional), requests go over a local Unix socket to a per-user background process.
 
 </details>
 

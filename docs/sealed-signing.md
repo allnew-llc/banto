@@ -13,8 +13,8 @@ leave the enclave, so no caller (human or agent) can copy it. banto only:
 That last property is the point: with a **user-presence** key, an autonomous agent
 that controls the workspace **cannot mint a signature silently** — each signature
 raises a Touch ID / passcode prompt that a human approves at the machine. This is
-what makes a sealed key an *external root of trust* (e.g. for `ios-app-factory-v5`
-TCB rotation-receipt reviewers). Read **Honest limits** below for the exact bounds of
+what makes a sealed key an *external root of trust* (e.g. for two-person
+rotation-receipt reviewers). Read **Honest limits** below for the exact bounds of
 that guarantee — it holds only for presence-required keys, presence is satisfiable by
 passcode as well as biometry, and it assumes the agent cannot drive the GUI to click
 the approval itself.
@@ -35,52 +35,52 @@ with a clear message).
 
 ```bash
 # one-time: create a sealed reviewer key (Touch ID required per signature)
-banto sealed create-key tcb-reviewer-1
+banto sealed create-key reviewer-1
 
-# export the PUBLIC key (register this in the v5 TCB trust-roots — it is not secret)
-banto sealed export-pubkey tcb-reviewer-1
-# -> {"key_id":"tcb-reviewer-1","curve":"P-256","alg":"ecdsa-p256-sha256",
+# export the PUBLIC key (register this in your trust-roots — it is not secret)
+banto sealed export-pubkey reviewer-1
+# -> {"key_id":"reviewer-1","curve":"P-256","alg":"ecdsa-p256-sha256",
 #     "public_key_x963_hex":"04...","x_hex":"...","y_hex":"..."}
 
 # sign a payload (a Touch ID prompt appears; the human approves)
-banto sealed sign tcb-reviewer-1 receipt-claim.bin        # -> DER signature (hex)
-printf '%s' "$CANONICAL_CLAIM" | banto sealed sign tcb-reviewer-1 -
+banto sealed sign reviewer-1 receipt-claim.bin        # -> DER signature (hex)
+printf '%s' "$CANONICAL_CLAIM" | banto sealed sign reviewer-1 -
 
 # verify (dependency-free)
 banto sealed verify <pubkey_x963_hex> receipt-claim.bin <sig_hex>
 
 banto sealed list
-banto sealed delete tcb-reviewer-1
+banto sealed delete reviewer-1
 ```
 
 `create-key --no-presence` omits the per-signature prompt (still non-extractable) —
 use only for automated self-tests, never for a production root of trust.
 
-## v5 TCB rotation-reviewer runbook
+## Two-reviewer runbook (example)
 
-To provision the external root of trust the v5 TCB rotation layer needs (two
-independent reviewers):
+Example: provisioning an external root of trust for a rotation-approval layer
+that requires two independent reviewers:
 
-1. On **two separate machines/people**, run `banto sealed create-key tcb-reviewer-N`
+1. On **two separate machines/people**, run `banto sealed create-key reviewer-N`
    (Touch ID required per signature). The private keys stay in each enclave.
-2. `banto sealed export-pubkey tcb-reviewer-N` on each, and put the two public keys
+2. `banto sealed export-pubkey reviewer-N` on each, and put the two public keys
    (with distinct `reviewer_group`s) into
-   `skills/ios-app-factory-v5/tcb-rotation-trust-roots.json` `roots[]`, with
-   `alg: "ecdsa-p256-sha256"`. Set `trusted_clock.status = provisioned`.
+   your verifier's trust-roots file, with `alg: "ecdsa-p256-sha256"`.
 3. To admit a rotation, each reviewer signs the canonical reviewer claim with
-   `banto sealed sign tcb-reviewer-N -` (approving via Touch ID). The two DER
+   `banto sealed sign reviewer-N -` (approving via Touch ID). The two DER
    signatures go into the rotation receipt.
-4. `v5_tcb_rotation.py` verifies both signatures against the trusted roots.
+4. Your verifier checks both signatures against the trusted roots
+   (`banto.ecdsa_p256.verify(...)` is a dependency-free option).
 
 > **Critical: the trust-roots file must be outside the automation's write surface.**
 > The enclave gives a non-extractable, human-gated signer, but the verifier trusts
-> whatever public keys sit in `tcb-rotation-trust-roots.json`. If that file lives in
+> whatever public keys sit in your trust-roots file. If that file lives in
 > a workspace a compromised agent can write, the agent bypasses the enclave entirely
 > — it generates an ordinary *software* P-256 keypair, enrols its own public key as a
 > "trusted reviewer," and signs claims with the key it holds (no Touch ID ever). **The
 > external root of trust is only as external as this registry.** Provision it on a
 > machine/branch the agent cannot write (e.g. pinned in a protected git branch, or
-> each root entry countersigned out-of-band); pinning it in the v5 TCB manifest under
+> each root entry countersigned out-of-band); pinning it in a signed manifest under
 > HEAD-anchoring makes a key swap *detectable*, not *prevented*.
 
 ## MCP tools
@@ -115,5 +115,5 @@ attack, so `delete` and `--no-presence` creation are **operator-only**, via
 - **Substitution is fenced off, not impossible.** `delete` is removed from MCP so a
   compromised agent cannot delete-and-recreate a reviewer key under the same `key_id`.
   An operator with terminal access still can — treat `banto sealed delete` and
-  `--no-presence` as privileged, and pin public keys in the v5 trust-roots so an
+  `--no-presence` as privileged, and pin public keys in your trust-roots so an
   unexpected key swap is at least detectable.

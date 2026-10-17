@@ -35,6 +35,10 @@ def build_mcp() -> FastMCP:
 
         This incurs provider API usage. Supply the model explicitly. No arbitrary
         URLs, auth headers, streaming, remote tools, or secret-return operations.
+        With budget gating on, set max_output_tokens (OpenAI) / max_tokens
+        (Anthropic) and use a model priced in pricing.json: the worst case is
+        reserved first and settled from reported usage. Calls are rate limited
+        (broker.api_request_rpm, default 30/min) and audited (metadata only).
         """
         return await asyncio.to_thread(BrokerClient().call, "api_request", provider=provider, payload=payload)
 

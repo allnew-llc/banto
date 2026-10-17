@@ -1,7 +1,7 @@
 """CLI subcommands for banto sealed signing (Secure Enclave, ECDSA-P256).
 
     banto sealed create-key <key_id> [--no-presence]
-    banto sealed export-pubkey <key_id>          # JSON for the v5 TCB trust-roots
+    banto sealed export-pubkey <key_id>          # JSON for your trust-roots file
     banto sealed sign <key_id> <payload_file|->  # DER signature (hex) to stdout
     banto sealed verify <pubkey_x963_hex> <payload_file|-> <sig_hex>
     banto sealed list

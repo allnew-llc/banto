@@ -19,14 +19,14 @@
       "exposure_manifest": "../recipes/stripe-live-secret.exposure.json"
     },
     {
-      "name": "quicktrust-ekyc-api-key",
-      "recipe": "../recipes/quicktrust-ekyc-api-key.issue.json",
-      "exposure_manifest": "../recipes/quicktrust-ekyc-api-key.exposure.json"
+      "name": "ekyc-api-key",
+      "recipe": "../recipes/ekyc-api-key.issue.json",
+      "exposure_manifest": "../recipes/ekyc-api-key.exposure.json"
     },
     {
-      "name": "quicktrust-ekyc-webhook-secret",
-      "recipe": "../recipes/quicktrust-ekyc-webhook-secret.issue.json",
-      "exposure_manifest": "../recipes/quicktrust-ekyc-webhook-secret.exposure.json",
+      "name": "ekyc-webhook-secret",
+      "recipe": "../recipes/ekyc-webhook-secret.issue.json",
+      "exposure_manifest": "../recipes/ekyc-webhook-secret.exposure.json",
       "validate": false,
       "smoke_preset": null
     },

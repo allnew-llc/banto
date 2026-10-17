@@ -1,6 +1,7 @@
 {
   "monthly_limit_usd": 0,
   "hold_timeout_hours": 24,
+  "broker": {"api_request_rpm": 30},
   "provider_limits": {},
   "model_limits": {},
   "model_profiles": {
