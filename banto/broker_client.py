@@ -59,9 +59,20 @@ class BrokerClient:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
                 connection.settimeout(self.timeout)
                 connection.connect(str(self.path))
-                connection.sendall(encode_message({"operation": operation, "arguments": arguments}))
+                send_error = None
+                try:
+                    connection.sendall(encode_message({"operation": operation, "arguments": arguments}))
+                except (BrokenPipeError, ConnectionResetError) as error:
+                    # The broker may reply (e.g. peer_denied) and close before reading
+                    # the request; its reply is still buffered, so read it.
+                    send_error = error
                 with connection.makefile("rb") as stream:
-                    result = read_message(stream)
+                    try:
+                        result = read_message(stream)
+                    except BrokerError:
+                        if send_error is not None:
+                            raise send_error from None
+                        raise
         except (OSError, ValueError):
             raise BrokerError("broker_unavailable_or_outcome_unknown; do not retry mutations blindly") from None
         if not result.get("ok"):
