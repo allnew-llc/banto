@@ -78,20 +78,49 @@ _PROFILE_DESCRIPTIONS = {
 }
 
 
+def _pricing_health(vault: SecureVault) -> dict | None:
+    from .guard import load_pricing, pricing_health
+    try:
+        pricing = vault._guard.pricing if vault._guard is not None else load_pricing(vault._config_path)
+        models = [
+            m for info in vault.get_profiles().values()
+            for m in info.get("models", {}).values()
+        ]
+    except (OSError, ValueError):
+        return None
+    return pricing_health(pricing, models)
+
+
+def _print_pricing_warnings(health: dict | None) -> None:
+    if not health:
+        return
+    if health["stale_models"]:
+        print(f"\nWarning: {len(health['stale_models'])} pricing entries were last verified more than "
+              f"{health['max_age_days']} days ago (oldest: {health['oldest_verified']}).")
+        print("  Estimates may be wrong. Check the provider pricing pages and update "
+              "~/.config/banto/pricing.json (banto init), or upgrade banto.")
+    if health["unpriced_profile_models"]:
+        print("\nWarning: profile models without a price entry (budgeted calls will be "
+              "rejected as unpriced_model): " + ", ".join(health["unpriced_profile_models"]))
+
+
 def cmd_status(args: list[str]) -> None:
     vault = SecureVault(caller="cli")
+    health = _pricing_health(vault)
     if not vault.budget_enabled:
         if _is_json(args):
-            _json_out({"budget_enabled": False})
+            _json_out({"budget_enabled": False, "pricing": health})
             return
         print("Budget: disabled (no monthly_limit_usd in config)")
         print("\nEnable with: banto budget 100")
+        _print_pricing_warnings(health)
         return
     guard = vault._guard
     assert guard is not None
     if _is_json(args):
         s = guard.get_remaining_budget()
         s["recommended_profile"] = guard.recommend_profile()
+        s["pricing"] = health
         _json_out(s)
         return
     s = guard.get_remaining_budget()
@@ -141,6 +170,8 @@ def cmd_status(args: list[str]) -> None:
                 print(f"  {m:35s}  ${used:.2f} / ${limit:.2f}  (${info['remaining_usd']:.2f} remaining)")
             else:
                 print(f"  {m:35s}  ${used:.2f}")
+
+    _print_pricing_warnings(health)
 
 
 def cmd_store(args: list[str]) -> None:

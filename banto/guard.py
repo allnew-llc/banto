@@ -96,6 +96,67 @@ def ensure_user_config() -> Path:
     return user_config
 
 
+PRICING_MAX_AGE_DAYS = 90
+
+
+def pricing_health(
+    pricing: dict,
+    profile_models: list[str] | None = None,
+    *,
+    today: datetime | None = None,
+    max_age_days: int = PRICING_MAX_AGE_DAYS,
+) -> dict:
+    """Report stale and missing price entries (for ``banto status``).
+
+    Each entry may carry ``"verified": "YYYY-MM-DD"``; entries without it fall
+    back to the file-level ``_updated`` date.  Entries whose date is missing
+    or older than ``max_age_days`` are reported as stale.
+    """
+    today = today or datetime.now()
+    updated = pricing.get("_updated")
+    stale: list[str] = []
+    oldest: str | None = None
+    for model, entry in pricing.items():
+        if model.startswith("_") or not isinstance(entry, dict):
+            continue
+        verified = entry.get("verified") or updated
+        try:
+            age = (today.date() - datetime.strptime(str(verified), "%Y-%m-%d").date()).days
+        except (TypeError, ValueError):
+            stale.append(model)
+            continue
+        if oldest is None or str(verified) < oldest:
+            oldest = str(verified)
+        if age > max_age_days:
+            stale.append(model)
+    unpriced = sorted({
+        m for m in (profile_models or [])
+        if m and not m.startswith("_") and m not in pricing
+    })
+    return {
+        "updated": updated,
+        "oldest_verified": oldest,
+        "max_age_days": max_age_days,
+        "stale_models": sorted(stale),
+        "unpriced_profile_models": unpriced,
+    }
+
+
+def load_pricing(config_path: str | Path | None = None) -> dict:
+    """Load the effective pricing table (inline ``pricing`` or pricing file)."""
+    resolved = _resolve_config_path(config_path)
+    try:
+        with open(resolved, encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        config = {}
+    if isinstance(config.get("pricing"), dict):
+        return config["pricing"]
+    path = _resolve_pricing_path(resolved.parent, config.get("pricing_file"))
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def update_config_file(config_path: Path, fn) -> dict:
     """Locked read-modify-write of a config JSON file; ``fn`` mutates the dict."""
     fd = os.open(str(config_path), os.O_RDWR | os.O_CREAT, 0o640)
