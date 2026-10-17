@@ -2238,18 +2238,6 @@ def cmd_sync_browser_issue(args: list[str]) -> None:
         sys.exit(1)
 
 
-def cmd_sync_quicktrust_credential(args: list[str]) -> None:
-    """Removed in 5.3.0: provider-specific wrapper moved out of public banto."""
-    print(
-        "Error: 'banto sync quicktrust-credential' was removed in banto 5.3.0.\n"
-        "Use the generic command instead:\n"
-        "  banto sync browser-issue <name> --recipe <recipe.json> "
-        "[--allow-manual-cutover] [--profile-dir <dir>] ...",
-        file=sys.stderr,
-    )
-    sys.exit(2)
-
-
 def cmd_sync_cloudflare_account_token(args: list[str]) -> None:
     """Create a Cloudflare Account API token and propagate it."""
     name = None
@@ -3985,9 +3973,6 @@ SYNC_COMMANDS = {
     "browser-record": cmd_sync_browser_record,
     "browser-issue": cmd_sync_browser_issue,
     "browser-revoke": cmd_sync_browser_revoke,
-    "quicktrust-credential": cmd_sync_quicktrust_credential,
-    "quicktrust-api-key": cmd_sync_quicktrust_credential,
-    "quicktrust-webhook-secret": cmd_sync_quicktrust_credential,
     "cloudflare-account-token": cmd_sync_cloudflare_account_token,
     "stripe-webhook-endpoint": cmd_sync_stripe_webhook_endpoint,
     "propagate": cmd_sync_propagate,
@@ -4003,10 +3988,8 @@ SYNC_COMMANDS = {
     "ui": cmd_sync_ui,
 }
 
-# Kept only so old invocations print a pointer; not documented.
-REMOVED_SYNC_COMMANDS = frozenset({
-    "quicktrust-credential", "quicktrust-api-key", "quicktrust-webhook-secret",
-})
+# Removed sync commands that must not be documented (currently none).
+REMOVED_SYNC_COMMANDS: frozenset[str] = frozenset()
 
 
 def cmd_sync_dispatch(args: list[str]) -> None:
