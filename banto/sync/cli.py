@@ -89,7 +89,7 @@ from .stripe_webhook_rotator import (
     build_stripe_webhook_endpoint_plan,
     rotate_stripe_webhook_endpoint,
 )
-from .sync import SyncReport, check_status, sync_all, sync_secret, remove_secret
+from .sync import SyncReport, check_status, sync_all, sync_secret
 from .vercel_inventory import build_vercel_inventory_report, report_to_json
 
 
@@ -157,7 +157,7 @@ def cmd_sync_status(args: list[str]) -> None:
             name = Path(t).name if "/" in t else t
             short_labels.append(name[:16])
 
-    print(f"\nBANTO SYNC — Secret Registry\n")
+    print("\nBANTO SYNC — Secret Registry\n")
     print(f"  Keychain service: {config.keychain_service} ({len(config.secrets)} keys)\n")
 
     col_w = max(14, *(len(s) for s in short_labels)) if short_labels else 14
@@ -3945,8 +3945,8 @@ def cmd_sync_setup(args: list[str]) -> None:
             })
             sys.exit(1)
         print(f"  No env vars discovered on {platform}:{project}.")
-        print(f"  This may indicate an auth issue, wrong project name, or empty project.")
-        print(f"\n  To fall back to known env var catalog, re-run with --guess:")
+        print("  This may indicate an auth issue, wrong project name, or empty project.")
+        print("\n  To fall back to known env var catalog, re-run with --guess:")
         print(f"    banto sync setup {platform}:{project} --guess")
         sys.exit(1)
 
@@ -3975,7 +3975,7 @@ def cmd_sync_setup(args: list[str]) -> None:
     print()
     if matched and not dry_run:
         print(f"  Registered {len(matched)} secret(s) in sync.json.")
-        print(f"  Run: banto sync push")
+        print("  Run: banto sync push")
     elif matched and dry_run:
         print(f"  Would register {len(matched)} secret(s). Remove --dry-run to apply.")
 

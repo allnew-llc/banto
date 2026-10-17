@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.0-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-5.2.2-0D3B66?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
-  <img src="https://img.shields.io/badge/230%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
+  <img src="https://img.shields.io/badge/497%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
   <img src="https://img.shields.io/badge/33%20drivers-0D3B66?style=flat-square&label=platforms" alt="platforms">
-  <img src="https://img.shields.io/badge/10%20tools-262626?style=flat-square&label=MCP" alt="mcp">
+  <img src="https://img.shields.io/badge/14%20tools-262626?style=flat-square&label=MCP" alt="mcp">
 </p>
 
 > Named after the **banto** (番頭) — the head clerk of Edo-period Japanese merchant houses who held the keys to the storehouse and managed the account books.
@@ -94,7 +94,7 @@ graph LR
 - **Drift detection** — SHA-256 fingerprints track Keychain changes vs. last push; `banto sync audit` catches when your deployed secrets are out of date
 - **Budget guard** — optional hold/settle pattern for LLM cost control. No budget = no key. Global, per-provider, and per-model limits
 - **Dynamic leases** — acquire short-lived credentials with TTL, auto-revoke on expiry
-- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel). 10 tools, all metadata-only
+- **MCP server** — native tool integration for Claude Code (stdio) and ChatGPT Connector (HTTP/SSE via tunnel). 14 tools (10 sync/validate/lease tools that return metadata only, plus 4 sealed-signing tools that return public keys/signatures — never secret values)
 - **Keychain-native storage** — macOS Security framework via ctypes; secret values never appear in process arguments
 - **Web dashboard** — localhost-only CRUD interface with CSRF protection (`banto sync ui`)
 - **Notifications** — Slack, Microsoft Teams, Datadog Events, PagerDuty
@@ -165,21 +165,23 @@ BANTO SYNC VALIDATE — Testing 4 key(s)
 
 - macOS (uses Keychain for secret storage)
 - Python 3.10+
-- No external dependencies (MCP server: `pip install banto[mcp]`)
+- No external dependencies (MCP server: `pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"`)
 
 ## ⚡ Quick start
 
 ### 1. Install
 
 ```bash
-# pip
-pip install banto
+# banto is not published on PyPI yet. Install directly from the GitHub repository.
 
 # uv (recommended)
-uv tool install banto
+uv tool install "git+https://github.com/allnew-llc/banto.git"
 
 # pipx
-pipx install banto
+pipx install "git+https://github.com/allnew-llc/banto.git"
+
+# pip
+pip install "git+https://github.com/allnew-llc/banto.git"
 
 # From source
 git clone https://github.com/allnew-llc/banto.git
@@ -187,7 +189,7 @@ cd banto
 pip install -e .
 
 # With MCP server support
-pip install banto[mcp]
+pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
 ### 2. Sync to a platform — one command
@@ -308,7 +310,7 @@ All commands support `--json` for machine-readable output.
 
 ## 🤖 MCP server
 
-banto exposes an MCP server so AI agents can orchestrate secret management. Agents never receive secret values — all tools return metadata only.
+banto exposes an MCP server so AI agents can orchestrate secret management. Agents never receive secret values — sync/validate/lease tools return metadata only, and sealed-signing tools return only public keys or signatures.
 
 ### Claude Code
 
@@ -328,7 +330,7 @@ Add to your `.mcp.json`:
 Requires the optional MCP dependency:
 
 ```bash
-pip install banto[mcp]
+pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
 ### ChatGPT
@@ -362,6 +364,11 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 | `banto_register_key` | Open browser popup for key entry | Human enters value |
 | `banto_lease_list` | List active leases | Read-only |
 | `banto_lease_cleanup` | Revoke expired leases | Modifies Keychain |
+| `banto_sync_setup` | Discover platform env vars and match Keychain entries | Queries cloud platforms |
+| `banto_sealed_create_key` | Create a Secure Enclave–sealed signing key | Private key never leaves the enclave |
+| `banto_sealed_export_pubkey` | Export a sealed key's public key | Read-only |
+| `banto_sealed_sign` | Sign a payload with a sealed key | Touch ID / passcode prompt (user-presence keys) |
+| `banto_sealed_list` | List sealed keys | Read-only |
 
 All tools include OpenAI-compatible annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`).
 

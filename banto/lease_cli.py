@@ -49,7 +49,7 @@ def cmd_lease_acquire(args: list[str]) -> None:
     print(f"  TTL:     {ttl_display}")
     print(f"  Expires: {info.expires_at}")
     if revoke_cmd:
-        print(f"  Revoke:  auto on expiry")
+        print("  Revoke:  auto on expiry")
     print(f"\n  Value stored in Keychain (retrieve with: banto lease get {info.lease_id})")
 
 

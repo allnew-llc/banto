@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Security
+
+- **DNS rebinding defense**: the local web UIs (`banto sync ui` on fixed port 8384 and the registration popup) now reject requests whose `Host` header is not `127.0.0.1:<port>` / `localhost:<port>`. CSRF tokens are compared with `hmac.compare_digest`
+- **Removed committed `.wrangler/` cache** (contained a Cloudflare account ID and account e-mail) and added `.wrangler/` to `.gitignore`. Note: the files remain in git history
+
+### Changed
+
+- README: install instructions now use the GitHub repository (`uv tool install "git+https://github.com/allnew-llc/banto.git"`) because banto is not published on PyPI
+- README: version/test/MCP-tool badges and tool table synced with the code (5.2.2, 14 MCP tools incl. sealed signing)
+- MCP annotations: `banto_sync_push` and `banto_sync_setup` now declare `openWorldHint: true` (they talk to external cloud platforms)
+- `banto.__version__` synced to 5.2.2 (matches `pyproject.toml`)
+
+
 ### Fixed
 
 - **Vercel push silently not updating values** (2026-08-09 incident): `vercel env add` in non-interactive mode with `--sensitive` reports success (exit 0) while failing to persist the value — old value retained on `--force` upserts of existing rows, empty value on fresh adds (vercel/vercel#16160). The driver now uses the proven-working form `vercel env add <NAME> <environment> --force` with the value on stdin, and no longer passes `--sensitive`/`--yes` to `env add`. Values remain encrypted at rest; enforce the sensitive marking via Vercel's team-level sensitive environment variable policy
@@ -12,6 +25,21 @@
 - **Verified Vercel writes**: after `vercel link`, the driver checks `.vercel/project.json` `projectName` against the requested project and refuses to write on mismatch (fail closed — `vercel link --yes` can resolve to or auto-create an unintended project). After each `env add`, the row's existence is confirmed via `vercel env ls <environment>` before reporting OK
 - **Team-scoped Vercel targets**: `--target vercel:<team>/<project>` passes `--scope <team>` to `vercel link`, so resolution no longer depends on the CLI's default team
 - **`banto sync add --environments production,preview`**: sets `Target.environments` from the CLI (previously only editable by hand in sync.json), controlling which Vercel environment rows a push updates
+
+## 5.2.2 (2026-03-27) — comprehensive audit fixes
+
+- H-01: `validate_keychain` uses ctypes `_ctypes_get()` instead of `security -w` (no secret values in process args)
+- M-01: registration popup returns 400 on malformed `Content-Length`
+- M-02: lease revoke failures are recorded (`revoke_error`) instead of swallowed
+- M-03: MCP HTTP/SSE transports are forced to `127.0.0.1`; warning when `BANTO_MCP_PATH_TOKEN` is unset
+- M-05: `mcp` dependency pinned to `<2`
+- L-01: `--port` parse errors handled
+
+## 5.2.1 (2026-03-27) — registration popup fixes
+
+- Registration popup / `banto register` now store keys under the `banto-sync` Keychain prefix used by sync tools
+- Registration popup no longer triggers Safari/iCloud password autosave (`type="text"` + `-webkit-text-security`)
+- `banto register <custom>` pre-fills the custom provider field; provider dropdown expanded to 19 entries
 
 ## 5.2.0 (2026-03-26) — sync setup Security Hardening
 

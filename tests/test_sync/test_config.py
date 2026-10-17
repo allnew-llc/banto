@@ -3,7 +3,6 @@
 """Tests for banto.sync.config — sync.json read/write."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
