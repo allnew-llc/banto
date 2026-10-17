@@ -145,4 +145,3 @@ banto sync browser-issue ekyc-api-key \
 
 Webhook signing secrets classify as `manual_cutover`; pass
 `--allow-manual-cutover` explicitly when you have coordinated the cutover.
-(The provider-specific `providerb-credential` wrapper was removed in 5.3.0.)

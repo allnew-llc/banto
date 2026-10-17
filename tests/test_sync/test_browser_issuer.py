@@ -32,7 +32,6 @@ from banto.sync.cli import (
     cmd_sync_browser_issue,
     cmd_sync_browser_record,
     cmd_sync_browser_revoke,
-    cmd_sync_providerb_credential,
 )
 from banto.sync.config import SecretEntry, SyncConfig, Target
 from banto.sync.propagation import PropagationResult, build_propagation_plan
@@ -483,13 +482,6 @@ def test_cmd_sync_browser_revoke_dry_run(mock_retire, browser_config, tmp_path, 
     assert payload["dry_run"] is True
     assert payload["key_id"] == "tok_old_123"
     mock_retire.assert_not_called()
-
-
-def test_cmd_sync_providerb_credential_removed_points_to_browser_issue(capsys):
-    with pytest.raises(SystemExit) as exc:
-        cmd_sync_providerb_credential(["anything", "--dry-run"])
-    assert exc.value.code == 2
-    assert "banto sync browser-issue" in capsys.readouterr().err
 
 
 def test_browser_batch_dry_run_validates_issue_and_retirement(browser_config, tmp_path):

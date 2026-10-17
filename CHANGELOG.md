@@ -24,7 +24,7 @@
 
 ### Removed
 
-- Client-specific code and documents that do not belong in the public package: the ClientA evaluation/material broker operations (`clienta_*`), the ProviderB validator and `banto sync providerb-credential` wrapper (now a stub pointing to `banto sync browser-issue`), PROJECTC rotation rules, and an internal Vercel rotation run log. Generic browser-recipe issuance covers the same flows. Note: these files remain in git history and in the 5.2.x sdists/wheels on PyPI
+- Client-specific code and documents that do not belong in the public package (provider-specific broker operations, validators, credential wrappers, rotation rules and an internal rotation run log) were removed. Generic browser-recipe issuance (`banto sync browser-issue`) covers the same flows. Note: these files remain in git history and in the 5.2.x sdists/wheels on PyPI
 
 ### Documentation
 
