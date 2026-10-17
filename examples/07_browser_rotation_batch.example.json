@@ -19,14 +19,14 @@
       "exposure_manifest": "../recipes/stripe-live-secret.exposure.json"
     },
     {
-      "name": "providerb-ekyc-api-key",
-      "recipe": "../recipes/providerb-ekyc-api-key.issue.json",
-      "exposure_manifest": "../recipes/providerb-ekyc-api-key.exposure.json"
+      "name": "ekyc-api-key",
+      "recipe": "../recipes/ekyc-api-key.issue.json",
+      "exposure_manifest": "../recipes/ekyc-api-key.exposure.json"
     },
     {
-      "name": "providerb-ekyc-webhook-secret",
-      "recipe": "../recipes/providerb-ekyc-webhook-secret.issue.json",
-      "exposure_manifest": "../recipes/providerb-ekyc-webhook-secret.exposure.json",
+      "name": "ekyc-webhook-secret",
+      "recipe": "../recipes/ekyc-webhook-secret.issue.json",
+      "exposure_manifest": "../recipes/ekyc-webhook-secret.exposure.json",
       "validate": false,
       "smoke_preset": null
     },

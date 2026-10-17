@@ -169,43 +169,6 @@ def _validate_stripe(key: str) -> ValidationResult:
     return ValidationResult("stripe", True, "unknown", f"HTTP {status}", status)
 
 
-def _validate_providerb(key: str) -> ValidationResult:
-    """ProviderB: GET /v1/verification-sessions (read-only list endpoint).
-
-    ProviderB documents 401 as invalid/missing API key and 403 as a valid key
-    without sufficient permission. Try both production and staging bases because
-    projectd uses ProviderB production for Vercel production and staging for
-    preview deployments.
-    """
-    saw_forbidden = False
-    saw_connection_failure = False
-    for base_url in ("https://api.providerb.jp", "https://api.staging.providerb.jp"):
-        status, body = _http_get(
-            f"{base_url}/v1/verification-sessions",
-            {"Authorization": f"Bearer {key}"},
-        )
-        if status == 200:
-            return ValidationResult("providerb", True, "pass", "Key valid")
-        if status == 403:
-            saw_forbidden = True
-        elif status == 0:
-            saw_connection_failure = True
-        elif status not in (401,):
-            return ValidationResult("providerb", True, "unknown", f"HTTP {status}", status)
-
-    if saw_forbidden:
-        return ValidationResult(
-            "providerb",
-            True,
-            "unknown",
-            "Key accepted but lacks verification-session list permission",
-            403,
-        )
-    if saw_connection_failure:
-        return ValidationResult("providerb", True, "unknown", "Connection failed", 0)
-    return ValidationResult("providerb", False, "fail", "Invalid API key", 401)
-
-
 def _validate_xai(key: str) -> ValidationResult:
     """xAI/Grok: GET /v1/models (OpenAI-compatible endpoint).
 
@@ -241,8 +204,6 @@ VALIDATORS: dict[str, callable] = {
     "cloudflare": _validate_cloudflare,
     "cloudflare-api": _validate_cloudflare,
     "stripe": _validate_stripe,
-    "ekyc": _validate_providerb,
-    "providerb": _validate_providerb,
     "xai": _validate_xai,
 }
 
@@ -254,8 +215,6 @@ SERVICE_PATTERNS: dict[str, str] = {
     "github": "github",
     "cloudflare": "cloudflare",
     "stripe": "stripe",
-    "ekyc": "providerb",
-    "providerb": "providerb",
     "xai": "xai",
 }
 
@@ -315,16 +274,6 @@ def validate_key(provider: str, value: str) -> ValidationResult:
 
     # Pattern match (for keychain service names like "claude-mcp-openai")
     provider_lower = provider.lower()
-    if (
-        "webhook" in provider_lower
-        and ("providerb" in provider_lower or "ekyc" in provider_lower)
-    ):
-        return ValidationResult(
-            "providerb",
-            True,
-            "unknown",
-            "Webhook signing secret format only; no remote validator",
-        )
     for pattern, name in SERVICE_PATTERNS.items():
         if pattern in provider_lower:
             return VALIDATORS[name](value)

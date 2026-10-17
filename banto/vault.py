@@ -161,10 +161,23 @@ class SecureVault:
         """Check if a provider has a stored key."""
         return self._backend.exists(provider)
 
-    def list_providers(self) -> list[str]:
-        """List providers that have stored keys."""
-        known = sorted(set(self._provider_map.values()))
-        return self._backend.list_providers(known)
+    def list_providers(self, extra: list[str] | None = None) -> list[str]:
+        """List providers that have stored keys.
+
+        Candidates are the configured providers (with or without budget
+        gating) plus ``extra`` names (e.g. sync.json accounts).
+        """
+        known = set(self._provider_map.values()) | set(extra or [])
+        if not self._provider_map:
+            from .guard import _resolve_config_path
+            try:
+                with open(_resolve_config_path(self._config_path), encoding="utf-8") as f:
+                    providers = json.load(f).get("providers", {})
+                known |= {p for p in providers if isinstance(p, str) and not p.startswith("_")}
+            except (OSError, ValueError, AttributeError):
+                pass
+        from .keychain import _PROVIDER_RE
+        return self._backend.list_providers(sorted(p for p in known if _PROVIDER_RE.match(p)))
 
     # --- Core: budget-gated key access ---
 
@@ -344,16 +357,34 @@ class SecureVault:
 
     # --- Profile management ---
 
-    def set_profile(self, name: str) -> None:
+    def _profiles(self) -> ProfileManager:
+        """Profiles work with or without budget gating (lazy load from config)."""
+        if self._profile_manager is None:
+            from .guard import _resolve_config_path
+            try:
+                with open(_resolve_config_path(self._config_path), encoding="utf-8") as f:
+                    config_data = json.load(f)
+            except (OSError, ValueError):
+                config_data = {}
+            self._profile_manager = ProfileManager(config_data)
+        return self._profile_manager
+
+    def set_profile(self, name: str, *, persist: bool = False) -> None:
         """Switch the active model profile.
 
         Args:
             name: Profile name (e.g. "quality", "balanced", "budget").
+            persist: Also save it as ``active_profile`` in the user config
+                     (the CLI does this; the default keeps it in memory).
 
         Raises:
             ValueError: If name is not a known profile.
         """
-        self._profile_manager.active_profile = name
+        self._profiles().active_profile = name
+        if persist:
+            from .guard import ensure_user_config, update_config_file
+            path = Path(self._config_path) if self._config_path else ensure_user_config()
+            update_config_file(path, lambda config: config.__setitem__("active_profile", name))
 
     def get_profiles(self) -> dict[str, dict]:
         """Return all profiles with active indicator.
@@ -361,4 +392,4 @@ class SecureVault:
         Returns:
             Dict mapping profile name to {"models": {...}, "active": bool}.
         """
-        return self._profile_manager.list_profiles()
+        return self._profiles().list_profiles()

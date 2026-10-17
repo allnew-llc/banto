@@ -151,35 +151,9 @@ class TestValidateModule:
         mock_get.assert_not_called()
 
     @patch("banto.sync.validate._http_get")
-    def test_providerb_validates_ekyc_key_against_read_only_endpoint(self, mock_get):
+    def test_vendor_specific_validators_removed(self, mock_get):
         from banto.sync.validate import validate_key
-        mock_get.return_value = (200, '{"data": []}')
-        result = validate_key("providerb-ekyc-api-key", "qt_test")
-        assert result.valid is True
-        assert result.status == "pass"
-        mock_get.assert_called_once_with(
-            "https://api.providerb.jp/v1/verification-sessions",
-            {"Authorization": "Bearer qt_test"},
-        )
-
-    @patch("banto.sync.validate._http_get")
-    def test_providerb_tries_staging_before_marking_invalid(self, mock_get):
-        from banto.sync.validate import validate_key
-        mock_get.side_effect = [
-            (401, '{"error": "Unauthorized"}'),
-            (200, '{"data": []}'),
-        ]
-        result = validate_key("ekyc", "qt_staging")
-        assert result.valid is True
-        assert result.status == "pass"
-        assert mock_get.call_args_list[1].args[0] == (
-            "https://api.staging.providerb.jp/v1/verification-sessions"
-        )
-
-    @patch("banto.sync.validate._http_get")
-    def test_providerb_webhook_secret_is_format_only(self, mock_get):
-        from banto.sync.validate import validate_key
-        result = validate_key("providerb-ekyc-webhook-secret", "shared-secret")
+        result = validate_key("ekyc", "fixture")
         assert result.valid is True
         assert result.status == "unknown"
         mock_get.assert_not_called()

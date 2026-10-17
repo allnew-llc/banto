@@ -1,8 +1,8 @@
 """Dependency-free ECDSA verification on NIST P-256 (secp256r1), SHA-256.
 
 Verifies signatures produced by the Secure Enclave sealed signer (``sealed_signer``)
-without any third-party crypto library — the same posture as the v5 TCB verifier
-that consumes these signatures. Verify-only: no signing, no key material.
+without any third-party crypto library, so downstream verifiers can stay
+dependency-free. Verify-only: no signing, no key material.
 """
 
 from __future__ import annotations

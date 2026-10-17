@@ -41,8 +41,8 @@ automate them without exposing secret values to agents.
 | `stripe-live-secret` | `STRIPE_SECRET_KEY` | Browser recipe / propagate only | `banto sync browser-issue stripe-live-secret ...` or `banto sync propagate stripe-live-secret ...` |
 | `stripe-test-webhook` | `STRIPE_WEBHOOK_SECRET` | Provider API + manual cutover | `banto sync stripe-webhook-endpoint stripe-test-webhook --source-secret stripe-test-secret ...` |
 | `stripe-live-webhook` | `STRIPE_WEBHOOK_SECRET` | Provider API + manual cutover | `banto sync stripe-webhook-endpoint stripe-live-webhook --source-secret stripe-live-secret ...` |
-| `providerb-ekyc-api-key` | `EKYC_API_KEY` | ProviderB browser recipe / propagate only | `banto sync providerb-credential providerb-ekyc-api-key --recipe ... --validate` |
-| `providerb-ekyc-webhook-secret` | `EKYC_WEBHOOK_SECRET` | ProviderB browser recipe / manual cutover | `banto sync providerb-credential providerb-ekyc-webhook-secret --recipe ... --revoke-recipe ...` |
+| `ekyc-api-key` | `EKYC_API_KEY` | Dashboard browser recipe / propagate only | `banto sync browser-issue ekyc-api-key --recipe ... --validate` |
+| `ekyc-webhook-secret` | `EKYC_WEBHOOK_SECRET` | Dashboard browser recipe / manual cutover | `banto sync browser-issue ekyc-webhook-secret --recipe ... --allow-manual-cutover --revoke-recipe ...` |
 | `claude-mcp-anthropic` | `ANTHROPIC_API_KEY` | Existing Keychain import / browser recipe | `banto sync import-keychain anthropic-api-key --from-service claude-mcp-anthropic` |
 | `cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | Existing Keychain import / Provider API | `banto sync import-keychain cloudflare-api-token --from-service cloudflare-api-token --from-account-empty` |
 | `claude-mcp-xai` | `XAI_API_KEY` | Existing Keychain import / Provider API when management key exists | `banto sync import-keychain xai-api-key --from-service claude-mcp-xai --push` |
@@ -116,45 +116,33 @@ The new signing secret is stored and synced without being printed. Coordinate
 application cutover before deleting the old Stripe webhook endpoint; omit
 `--delete-previous-endpoint` until the new endpoint is live.
 
-## ProviderB Dashboard Credentials
+## Dashboard-only Credentials
 
-ProviderB documents API key creation and deletion as management-dashboard
-operations: create a new key, copy the one-time value from the modal, update
-the application, then delete the old key. banto models this as a browser recipe
-so the issued value is captured inside the local process and never printed.
+Some providers only support key creation and deletion in a management
+dashboard: create a new key, copy the one-time value from a modal, update the
+application, then delete the old key. banto models this as a browser recipe so
+the issued value is captured inside the local process and never printed.
 
 Record the dashboard flow once:
 
 ```bash
-banto sync browser-record providerb-ekyc-api-key \
-  --provider providerb \
-  --start-url https://<providerb-dashboard>/admin/api-keys \
-  --output recipes/providerb-ekyc-api-key.issue.json \
+banto sync browser-record ekyc-api-key \
+  --provider ekyc \
+  --start-url https://<provider-dashboard>/admin/api-keys \
+  --output recipes/ekyc-api-key.issue.json \
   --capture-selector '<selector-for-one-time-api-key>' \
   --metadata key_id='<selector-for-new-key-row-or-preview>'
 ```
 
-Dry-run the closed-loop command:
+Dry-run, then run, the closed-loop command:
 
 ```bash
-banto sync providerb-credential providerb-ekyc-api-key \
-  --recipe recipes/providerb-ekyc-api-key.issue.json \
-  --exposure-manifest recipes/providerb-ekyc-api-key.exposure.json \
-  --validate \
-  --dry-run
+banto sync browser-issue ekyc-api-key \
+  --recipe recipes/ekyc-api-key.issue.json \
+  --exposure-manifest recipes/ekyc-api-key.exposure.json \
+  --validate --dry-run
 ```
 
-Live run:
-
-```bash
-banto sync providerb-credential providerb-ekyc-api-key \
-  --recipe recipes/providerb-ekyc-api-key.issue.json \
-  --exposure-manifest recipes/providerb-ekyc-api-key.exposure.json \
-  --validate
-```
-
-The `providerb-credential` wrapper accepts recipes whose provider is
-`providerb`, uses a stable local ProviderB browser profile by default, and
-allows the `EKYC_WEBHOOK_SECRET` manual-cutover lane. API-key validation uses
-ProviderB's authenticated `GET /v1/verification-sessions` endpoint against
-production first and staging second.
+Webhook signing secrets classify as `manual_cutover`; pass
+`--allow-manual-cutover` explicitly when you have coordinated the cutover.
+(The provider-specific `providerb-credential` wrapper was removed in 5.3.0.)

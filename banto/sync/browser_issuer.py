@@ -271,18 +271,8 @@ def default_browser_profile_dir(recipe: BrowserIssuerRecipe) -> Path:
 
 
 def _recipe_provider_matches(recipe_provider: str, plan: PropagationPlan) -> bool:
-    """Return whether a browser recipe can operate on a propagation plan.
-
-    ProviderB API keys classify as `ekyc` and ProviderB webhook secrets
-    classify as generic `webhook`; accepting `providerb` here lets one
-    provider-specific dashboard recipe cover both configured secret names.
-    """
-    if recipe_provider in {"*", plan.provider}:
-        return True
-    return (
-        recipe_provider == "providerb"
-        and plan.env_name in {"EKYC_API_KEY", "EKYC_WEBHOOK_SECRET"}
-    )
+    """Return whether a browser recipe can operate on a propagation plan."""
+    return recipe_provider in {"*", plan.provider}
 
 
 def build_browser_issue_plan(

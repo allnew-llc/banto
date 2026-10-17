@@ -78,20 +78,49 @@ _PROFILE_DESCRIPTIONS = {
 }
 
 
+def _pricing_health(vault: SecureVault) -> dict | None:
+    from .guard import load_pricing, pricing_health
+    try:
+        pricing = vault._guard.pricing if vault._guard is not None else load_pricing(vault._config_path)
+        models = [
+            m for info in vault.get_profiles().values()
+            for m in info.get("models", {}).values()
+        ]
+    except (OSError, ValueError):
+        return None
+    return pricing_health(pricing, models)
+
+
+def _print_pricing_warnings(health: dict | None) -> None:
+    if not health:
+        return
+    if health["stale_models"]:
+        print(f"\nWarning: {len(health['stale_models'])} pricing entries were last verified more than "
+              f"{health['max_age_days']} days ago (oldest: {health['oldest_verified']}).")
+        print("  Estimates may be wrong. Check the provider pricing pages and update "
+              "~/.config/banto/pricing.json (banto init), or upgrade banto.")
+    if health["unpriced_profile_models"]:
+        print("\nWarning: profile models without a price entry (budgeted calls will be "
+              "rejected as unpriced_model): " + ", ".join(health["unpriced_profile_models"]))
+
+
 def cmd_status(args: list[str]) -> None:
     vault = SecureVault(caller="cli")
+    health = _pricing_health(vault)
     if not vault.budget_enabled:
         if _is_json(args):
-            _json_out({"budget_enabled": False})
+            _json_out({"budget_enabled": False, "pricing": health})
             return
         print("Budget: disabled (no monthly_limit_usd in config)")
         print("\nEnable with: banto budget 100")
+        _print_pricing_warnings(health)
         return
     guard = vault._guard
     assert guard is not None
     if _is_json(args):
         s = guard.get_remaining_budget()
         s["recommended_profile"] = guard.recommend_profile()
+        s["pricing"] = health
         _json_out(s)
         return
     s = guard.get_remaining_budget()
@@ -141,6 +170,8 @@ def cmd_status(args: list[str]) -> None:
                 print(f"  {m:35s}  ${used:.2f} / ${limit:.2f}  (${info['remaining_usd']:.2f} remaining)")
             else:
                 print(f"  {m:35s}  ${used:.2f}")
+
+    _print_pricing_warnings(health)
 
 
 def cmd_store(args: list[str]) -> None:
@@ -207,8 +238,11 @@ def cmd_delete(args: list[str]) -> None:
 
 
 def cmd_list(args: list[str]) -> None:
-    vault = SecureVault(caller="cli")
-    providers = vault.list_providers()
+    # Same Keychain namespace as `banto store` / `banto register`.
+    sync_config = SyncConfig.load()
+    vault = SecureVault(caller="cli", keychain_prefix=sync_config.keychain_service)
+    accounts = [entry.account for entry in sync_config.secrets.values() if entry.account]
+    providers = vault.list_providers(extra=accounts)
     budget = vault.get_budget_status()
 
     if _is_json(args):
@@ -270,23 +304,53 @@ def cmd_check(args: list[str]) -> None:
             print(f"Unknown option: {args[i]}", file=sys.stderr)
             sys.exit(1)
 
-    guard = CostGuard(caller="cli")
-    cost = guard.estimate_cost(model=model, **kwargs)
-    budget = guard.get_remaining_budget()
-    allowed = cost <= budget["remaining_usd"]
+    from .guard import BudgetExceededError
+    vault = SecureVault(caller="cli")
+    guard = vault._guard or CostGuard(caller="cli")
+    try:
+        cost = guard.estimate_cost(model=model, **kwargs)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not vault.budget_enabled:
+        if _is_json(args):
+            _json_out({"model": model, "estimated_usd": cost, "budget_enabled": False,
+                       "allowed": True})
+            return
+        print(f"Model:     {model}")
+        print(f"Estimated: ${cost:.4f}")
+        print("Result:    ALLOWED (budget disabled — enable with: banto budget <amount>)")
+        return
+
+    # Same three-layer check (global, provider, model) as hold_budget().
+    provider = kwargs.pop("provider", "") or vault._provider_map.get(model, "")
+    blocked = None
+    try:
+        guard.check_budget(model, provider=provider, **kwargs)
+    except BudgetExceededError as e:
+        blocked = e
+    remaining = guard.get_remaining_budget()["remaining_usd"]
 
     if _is_json(args):
-        _json_out({"model": model, "estimated_usd": cost,
-                    "remaining_usd": budget["remaining_usd"], "allowed": allowed})
+        out = {"model": model, "estimated_usd": cost, "remaining_usd": remaining,
+               "budget_enabled": True, "allowed": blocked is None}
+        if blocked is not None:
+            out.update({"blocked_scope": blocked.scope, "blocked_scope_name": blocked.scope_name,
+                        "scope_remaining_usd": blocked.remaining})
+        _json_out(out)
         return
 
     print(f"Model:     {model}")
     print(f"Estimated: ${cost:.4f}")
-    print(f"Remaining: ${budget['remaining_usd']:.2f}")
-    if cost <= budget["remaining_usd"]:
+    print(f"Remaining: ${remaining:.2f}")
+    if blocked is None:
         print("Result:    ALLOWED")
+    elif blocked.scope == "global":
+        print("Result:    BLOCKED (over monthly budget)")
     else:
-        print("Result:    BLOCKED (over budget)")
+        print(f"Result:    BLOCKED (over {blocked.scope} '{blocked.scope_name}' limit, "
+              f"${blocked.remaining:.2f} remaining)")
 
 
 def cmd_profile(args: list[str]) -> None:
@@ -312,7 +376,7 @@ def cmd_profile(args: list[str]) -> None:
 
     profile_name = args[0]
     try:
-        vault.set_profile(profile_name)
+        vault.set_profile(profile_name, persist=True)
         print(f"Active profile set to '{profile_name}'.")
         desc = _PROFILE_DESCRIPTIONS.get(profile_name, "")
         if desc:
@@ -461,6 +525,15 @@ def cmd_register_asc(args: list[str]) -> None:
     print("Done.")
 
 
+def cmd_register_x_oauth(args: list[str]) -> None:
+    """There is no X OAuth popup; point to the supported PKCE enrolment."""
+    print("Error: 'banto register-x-oauth' is not available.\n"
+          "Enroll an X OAuth 2.0 user token with PKCE instead:\n"
+          "  banto sync x-oauth-authorize <name> ...   (see: banto sync x-oauth-authorize --help)",
+          file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_sync(args: list[str]) -> None:
     from .sync.cli import cmd_sync_dispatch
     cmd_sync_dispatch(args)
@@ -505,6 +578,7 @@ COMMANDS = {
     "register": cmd_register,
     "register-asc": cmd_register_asc,
     "asc-register": cmd_register_asc,
+    "register-x-oauth": cmd_register_x_oauth,
     "delete": cmd_delete,
     "list": cmd_list,
     "check": cmd_check,
@@ -539,12 +613,13 @@ def main() -> None:
         print("Usage: banto <command> [args]")
         print("       banto --version | -V\n")
         print("Commands:")
-        print("  broker <cmd>        Common Keychain process: install, health, enable, call")
+        print("  broker <cmd>        Common Keychain process: install, health, enable, disable, call, audit")
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
         print("  profile [name]      Show or set the active model profile")
         print("  store <provider>    Store an API key in Keychain (terminal)")
         print("  register [provider] Open browser popup to store an API key")
+        print("  register-asc        Open App Store Connect (.p8) credential registration popup")
         print("  delete <provider>   Delete an API key from Keychain")
         print("  list                List stored keys and budget")
         print("  check <model> ...   Dry-run budget check")
@@ -554,6 +629,10 @@ def main() -> None:
         print("  sealed <cmd>        Secure Enclave sealed signing (non-extractable keys)")
         print("  chatgpt connect     Connect banto to ChatGPT (starts tunnel)")
         print("  version             Show the installed version (also --version, -V)")
+        print()
+        print("Broker mode (after `banto broker enable`): store, delete, lease and most sync")
+        print("subcommands are disabled; register, sync status/audit/validate/push are routed")
+        print("through the broker. See docs/local-broker.md.")
         print()
         print("Budget examples:")
         print("  banto budget                          Show all limits")

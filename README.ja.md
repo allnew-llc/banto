@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.4-0D3B66?style=flat-square" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
+  <a href="https://pypi.org/project/banto/"><img src="https://img.shields.io/pypi/v/banto?style=flat-square&color=0D3B66" alt="PyPI version"></a>
+  <img src="https://img.shields.io/badge/python-3.10%E2%80%933.14-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
-  <img src="https://img.shields.io/badge/497%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
+  <a href="https://github.com/allnew-llc/banto/actions/workflows/ci.yml"><img src="https://github.com/allnew-llc/banto/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/33%20drivers-0D3B66?style=flat-square&label=platforms" alt="platforms">
-  <img src="https://img.shields.io/badge/14%20tools-262626?style=flat-square&label=MCP" alt="mcp">
+  <img src="https://img.shields.io/badge/14%20tools%20(16%20via%20broker)-262626?style=flat-square&label=MCP" alt="mcp">
 </p>
 
 > **番頭**（banto） -- 江戸時代の商家において蔵の鍵と帳簿を預かり、主人の留守にも商いの秩序を守った筆頭番頭に由来します。
@@ -77,6 +77,7 @@ graph LR
 - [⚡ クイックスタート](#-クイックスタート)
 - [💻 CLIリファレンス](#-cliリファレンス)
 - [🤖 MCPサーバー](#-mcpサーバー)
+- [🏠 ローカルブローカー](#-ローカルブローカーオプション)
 - [🔒 セキュリティ](#-セキュリティ)
 - [🐍 Python API](#-python-api)
 - [🔌 カスタムバックエンド](#-カスタムバックエンド)
@@ -98,6 +99,8 @@ graph LR
 - **フィンガープリントドリフト検出** — SHA-256フィンガープリントでKeychainの変更と最終プッシュを追跡。`banto sync audit` でドリフトを検知
 - **全コマンドで `--json` 出力** — エージェントやCI連携のための機械可読出力
 - **通知連携** — Slack、Microsoft Teams、Datadog Events、PagerDuty
+- **MCPサーバー** — Claude Code（stdio）とChatGPT Connector（トンネル経由HTTP/SSE）。14ツール（メタデータのみを返す同期・検証・リース系10個と、公開鍵・署名のみを返すsealed署名系4個）。ブローカーモードでは `banto_api_request` と `banto_broker_health` を加えた16ツール
+- **ローカルブローカー（オプション、macOS）** — ユーザーごとの常駐プロセス1つだけがKeychainを読み、エージェントやスクリプトはUnix socket経由で操作を依頼します（値は返りません）。予算付き `api_request` はOpenAI/Anthropic呼び出し前に最大コストを予約し、報告された使用量で精算。分単位のレート制限と、メタデータのみのハッシュチェーン監査ログ
 - **ランタイム依存ゼロ** — 標準ライブラリのみ（ctypesは標準ライブラリの一部）。MCPサーバーにはオプションの `mcp` パッケージが必要
 
 <details>
@@ -234,7 +237,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 ## 💻 CLIリファレンス
 
 <details>
-<summary><strong>コアコマンド (10)</strong></summary>
+<summary><strong>コアコマンド (13)</strong></summary>
 
 | コマンド | 説明 |
 |---------|------|
@@ -243,16 +246,21 @@ banto budget --provider openai 30    # OpenAI $30/月
 | `banto profile [name]` | アクティブなモデルプロファイルの表示・設定（quality/balanced/budget） |
 | `banto store <provider>` | APIキーをKeychainに登録（ターミナルプロンプト） |
 | `banto register [provider]` | ブラウザポップアップを開いてAPIキーを登録 |
+| `banto register-asc` | App Store Connect（.p8キー）登録ポップアップを開く |
 | `banto delete <provider>` | APIキーをKeychainから削除 |
-| `banto list` | 登録済みキーと予算の一覧 |
-| `banto check <model> ...` | コスト見積もりのドライラン（`--tokens`、`--n`、`--seconds`、`--quality`、`--size`） |
+| `banto list` | 登録済みキー（`store`/`register` と同じKeychain名前空間）と予算の一覧 |
+| `banto check <model> ...` | グローバル・プロバイダ別・モデル別上限に対するドライラン（`--tokens`、`--n`、`--seconds`、`--quality`、`--size`）。予算無効時は `ALLOWED (budget disabled)` |
 | `banto init` | デフォルト設定を `~/.config/banto/` にコピー |
 | `banto version` | インストール済みのバージョンを表示（`banto --version` / `banto -V` も可。ブローカーモードでも動作） |
+| `banto sealed <cmd>` | Secure Enclave署名鍵: `create-key`、`export-pubkey`、`sign`、`verify`、`list`、`delete` |
+| `banto broker <cmd>` | ローカルブローカー: `install`、`health`、`enable`、`disable`、`call`、`audit [--tail N] [--verify]`（[ローカルブローカー](#-ローカルブローカーオプション)参照） |
+
+`banto profile <name>` の選択は `~/.config/banto/config.json` に保存されます。`banto status` は90日より古い料金エントリや、料金未登録のプロファイルモデルを警告します。`banto register-x-oauth` はありません。X OAuth 2.0ユーザートークンは `banto sync x-oauth-authorize` で登録します（このコマンドは案内を表示して終了コード2で終了します）。
 
 </details>
 
 <details>
-<summary><strong>Syncコマンド (25)</strong></summary>
+<summary><strong>Syncコマンド (31)</strong></summary>
 
 | コマンド | 説明 |
 |---------|------|
@@ -264,13 +272,18 @@ banto budget --provider openai 30    # OpenAI $30/月
 | `banto sync vercel-inventory` | 値を読まずにVercel環境変数の棚卸しを実行 |
 | `banto sync push [name]` | Keychainからターゲットにシークレットをプッシュ（`--validate` でプッシュ前チェック） |
 | `banto sync add <name>` | 新規シークレットの追加（`--env`、`--target platform:project`） |
+| `banto sync import-keychain <name>` | 既存のKeychain項目を値を表示せずにsyncアカウントへ取り込み |
 | `banto sync google-api-key <name>` | Google APIキーを発行し、安全に伝播 |
 | `banto sync openai-service-account <name>` | OpenAI service account keyを発行し、安全に伝播 |
 | `banto sync openai-service-accounts` | キー値を出さずにOpenAI service accountを一覧 |
 | `banto sync openai-revoke-service-account` | OpenAI service accountを失効 |
 | `banto sync xai-api-key <name>` | management keyを使ってxAI runtime API keyを発行 |
+| `banto sync x-oauth-authorize <name>` | PKCEで必要スコープだけのX OAuth 2.0ユーザートークンを登録（ローカルcallback、値は表示しない） |
+| `banto sync x-oauth-user-token <name>` | refresh tokenでX OAuth 2.0ユーザートークンをローテーション |
+| `banto sync browser-batch <plan.json>` | メタデータのみの計画ファイルで複数のブラウザローテーションを実行 |
+| `banto sync browser-record <name>` | 管理画面の操作を値を書き込まずにbrowser recipeとして記録 |
 | `banto sync browser-issue <name>` | ローカルブラウザrecipeでキーを発行し、値を表示せずKeychainと同期先へ反映 |
-| `banto sync providerb-credential <name>` | ProviderB管理画面のbrowser recipeでAPIキーまたはwebhook secretを発行 |
+| `banto sync browser-revoke <name>` | 置換後、ブラウザ管理キーをkey id/ラベルで失効 |
 | `banto sync cloudflare-account-token <name>` | Cloudflare Account API tokenを発行し、値を表示せず伝播 |
 | `banto sync stripe-webhook-endpoint <name>` | Stripe webhook endpointを作成し、署名secretを伝播 |
 | `banto sync propagate <name>` | 信頼済みローカルコマンドの置換値を保存・同期 |
@@ -291,10 +304,12 @@ banto budget --provider openai 30    # OpenAI $30/月
 | コマンド | 説明 |
 |---------|------|
 | `banto lease acquire <name>` | 短期クレデンシャルの取得（`--cmd`、`--revoke-cmd`、`--ttl`） |
-| `banto lease get <lease_id>` | クレデンシャル値の取得（stdout、パイプ用） |
-| `banto lease revoke <lease_id>` | リースの明示的な失効 |
-| `banto lease list` | アクティブなリースと残りTTLの一覧 |
-| `banto lease cleanup` | 期限切れリースの一括失効 |
+| `banto lease get <lease_id>` | クレデンシャル値の取得（stdout、パイプ用）。秘密値を出力するため、エージェント環境では実行しない |
+| `banto lease revoke <lease_id>` | リースの明示的な失効（失効コマンドが失敗した場合は終了コード1、状態は `revoke_failed`） |
+| `banto lease list` | アクティブなリース、残りTTL、失効待ちリースの一覧 |
+| `banto lease cleanup` | 期限切れリースの失効と、失敗した失効の再試行（失敗が残れば終了コード1） |
+
+TTLは1秒〜7日です。`--revoke-cmd` では `$BANTO_LEASE_VALUE` を参照でき、値はargvではなく環境変数で渡されます（`/bin/sh -c` で実行）。失効に成功するまでリース値はKeychainに残ります。
 
 </details>
 
@@ -307,7 +322,9 @@ banto budget --provider openai 30    # OpenAI $30/月
 
 </details>
 
-すべてのコマンドで `--json` オプションによる機械可読出力に対応しています。
+ブローカーモード（`banto broker enable`）では、`store`、`delete`、`lease`、および `status`・`audit`・`validate [--keychain]`・`push` 以外のsyncサブコマンドは無効です。`register`、`register-asc` と上記のsyncサブコマンドはブローカー経由で実行されます。
+
+ほとんどのコマンドが `--json` オプションによる機械可読出力に対応しています。
 
 ## 🤖 MCPサーバー
 
@@ -370,8 +387,32 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 | `banto_sealed_export_pubkey` | sealed 鍵の公開鍵を出力 | 読み取り専用 |
 | `banto_sealed_sign` | sealed 鍵でペイロードに署名 | user-presence 鍵では Touch ID / パスコード確認 |
 | `banto_sealed_list` | sealed 鍵の一覧 | 読み取り専用 |
+| `banto_api_request` | ブローカーモードのみ: キーを渡さずOpenAI Responses / Anthropic Messagesを呼び出し | API利用料が発生。予算・レート制限・監査対象 |
+| `banto_broker_health` | ブローカーモードのみ: ブローカーの稼働確認 | 読み取り専用。Keychainを読まない |
 
 すべてのツールにOpenAI互換アノテーション（`readOnlyHint`、`destructiveHint`、`openWorldHint`）が含まれます。
+
+## 🏠 ローカルブローカー（オプション）
+
+ブローカーはユーザーごとのLaunchAgent（`work.allnew.banto.broker`）で、Keychainを読む唯一のプロセスです。MCPクライアント（`banto-mcp` は自動で転送）、CLI、Pythonスクリプト（`banto.broker_client.BrokerClient`）はUnix socket（0700ディレクトリ内の0600、接続元UIDを検証）で操作を依頼します。秘密値を返す操作はありません。
+
+```bash
+uv tool install "banto[mcp]"     # pipx / pip でも可。ブローカーには mcp extra が必要
+banto broker install             # このPythonの絶対パスでLaunchAgentを登録
+banto broker health              # PIDとPythonパスのみ。Keychainは読まない
+banto broker enable              # ブローカーモード: 直接Keychainを読む経路は失敗する
+banto broker audit --verify      # ハッシュチェーン監査ログを検証
+```
+
+banto更新後はサービスを再起動します: `launchctl kickstart -k gui/$(id -u)/work.allnew.banto.broker`。`banto broker disable` で従来モードに戻ります。詳細: [docs/local-broker.md](./docs/local-broker.md)。
+
+**`api_request`**（`BrokerClient().call("api_request", provider="openai"|"anthropic", payload={...})` またはMCPの `banto_api_request`）はOpenAI Responses / Anthropic Messagesの非ストリーミング呼び出しです。宛先・認証ヘッダー・リダイレクトは固定で、リモートツールやストリーミングは拒否します。予算ゲーティングが有効な場合:
+
+- payloadに `max_output_tokens`（OpenAI）/ `max_tokens`（Anthropic）が必要で、モデルは `pricing.json` に `per_token` エントリが必要です（なければ `unpriced_model`）
+- 呼び出し前に最大コスト（payloadサイズを入力トークンの上限とみなす + 最大出力）を永続holdとして予約し（収まらなければ `budget_exceeded`）、プロバイダが報告した使用量で精算します（レスポンスの `banto_budget`）
+- 4xxで拒否された場合はholdを解放します。ネットワークエラー・タイムアウト・5xxは課金された可能性があるためholdを残します（`upstream_failed_or_outcome_unknown`）。残したholdは `hold_timeout_hours` では解除されず、その月の予算に計上されます
+
+呼び出しは `broker.api_request_rpm`（1分あたり、既定30、`0`で無効）に制限されます。すべての操作はブローカーのruntimeディレクトリの `audit.jsonl` に記録されます。内容は時刻、操作、結果、エラーコード、許可リストのメタデータ（プロバイダ、モデル、ステータス、コスト、トークン数、引数名）のみで、payloadや値は含みません。各レコードは直前レコードのSHA-256を持ちます。
 
 ## 🔒 セキュリティ
 
@@ -566,6 +607,7 @@ vault = SecureVault(
 ```json
 {
   "monthly_limit_usd": 0,
+  "broker": {"api_request_rpm": 30},
   "providers": {
     "openai": {
       "models": ["gpt-4o", "dall-e-3", "sora-2"]
@@ -577,16 +619,18 @@ vault = SecureVault(
 }
 ```
 
-予算はUSD建てで、暦月単位で適用されます。デフォルトは `0`（予算無効。コストチェックなしでキーが返されます）。値を設定すると予算ゲーティングが有効になります。
+予算はUSD建てで、暦月単位で適用されます。デフォルトは `0`（予算無効。コストチェックなしでキーが返されます）。値を設定すると予算ゲーティングが有効になります。`banto budget` / `CostGuard.set_budget()` は `~/.config/banto/config.json`（初回書き込み時に同梱の既定値から作成）に書き込み、インストール済みパッケージ内のファイルは変更しません。`broker.api_request_rpm` はブローカーの `api_request` の1分あたりの上限です。
 
 ### `pricing.json` — モデル料金テーブル
 
 ```json
 {
+  "_updated": "2026-10-17",
   "gpt-4o": {
     "type": "per_token",
     "input_per_1k": 0.0025,
-    "output_per_1k": 0.01
+    "output_per_1k": 0.01,
+    "verified": "2026-10-17"
   },
   "dall-e-3": {
     "type": "per_image",
@@ -603,7 +647,7 @@ vault = SecureVault(
 }
 ```
 
-料金は静的です。bantoは実行時にプロバイダAPIから料金を取得しません。各プロバイダの公式料金ページで最新の料金を確認し、`pricing.json` を更新してください。
+料金は静的です。bantoは実行時にプロバイダAPIから料金を取得しません。各プロバイダの公式料金ページで最新の料金を確認し、`pricing.json` を更新してください。`verified` は各エントリを最後に確認した日付です（ない場合は `_updated`）。`banto status` は90日より古いエントリを警告します。
 
 ### `sync.json` — マルチプラットフォーム同期設定
 
@@ -633,7 +677,7 @@ vault = SecureVault(
 <details>
 <summary><strong>pricing.json はどのくらいの頻度で更新すべきですか？</strong></summary>
 
-月1回、プロバイダの料金ページを確認してください。bantoは実行時に料金を取得しません（主要プロバイダには公開料金APIがありません）。料金が変更された場合は `~/.config/banto/pricing.json` を編集してください。
+月1回、プロバイダの料金ページを確認してください。`verified` の日付が90日を超えると `banto status` が警告します。bantoは実行時に料金を取得しません（主要プロバイダには公開料金APIがありません）。料金が変更された場合は `~/.config/banto/pricing.json` を編集してください。
 
 </details>
 
@@ -668,7 +712,7 @@ vault = SecureVault(
 <details>
 <summary><strong>パフォーマンスへの影響は？</strong></summary>
 
-無視できるレベルです。bantoは完全にローカルで動作します — ctypes経由のKeychainアクセスはサブミリ秒、予算チェックはローカルJSONファイルの `fcntl` ロック付き読み取り、syncドライバはプラットフォームCLIを直接呼び出します。リモートプロキシ、デーモン、ネットワーク遅延は一切ありません。
+無視できるレベルです。bantoは完全にローカルで動作します — ctypes経由のKeychainアクセスはサブミリ秒、予算チェックはローカルJSONファイルの `fcntl` ロック付き読み取り、syncドライバはプラットフォームCLIを直接呼び出します。リモートプロキシやネットワーク遅延はありません。ブローカーなしではプロセス内で動作し、オプションの[ローカルブローカー](#-ローカルブローカーオプション)を有効にした場合はローカルUnix socket経由でユーザーごとの常駐プロセスに依頼します。
 
 </details>
 

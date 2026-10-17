@@ -582,7 +582,8 @@ async def banto_lease_list() -> dict:
     from .lease import LeaseManager
 
     mgr = LeaseManager()
-    active = mgr.list_leases()
+    active = mgr.list_leases()  # read-only: never revokes or deletes
+    pending = mgr.pending_revocation()
 
     count = len(active)
     if count == 0:
@@ -597,6 +598,7 @@ async def banto_lease_list() -> dict:
         "structuredContent": {
             "leases": active,
             "count": count,
+            "pending_revocation": pending,
         },
         "content": summary,
     }
@@ -607,17 +609,19 @@ async def banto_lease_list() -> dict:
 @mcp.tool(annotations={
     "readOnlyHint": False,
     "destructiveHint": True,
-    "openWorldHint": False,
+    "openWorldHint": True,
 })
 async def banto_lease_cleanup() -> dict:
-    """Revoke all expired leases to free Keychain entries.
+    """Revoke all expired leases and retry failed revocations.
 
-    Runs revocation commands and removes expired credentials from Keychain.
+    Runs user-configured revocation commands (which may call external cloud
+    APIs) and removes credentials from Keychain only after revocation succeeds.
     """
     from .lease import LeaseManager
 
     mgr = LeaseManager()
     revoked = mgr.cleanup()
+    failed = [p for p in mgr.pending_revocation() if p.get("status") == "revoke_failed"]
 
     if revoked == 0:
         summary = "No expired leases to clean up"
@@ -627,6 +631,7 @@ async def banto_lease_cleanup() -> dict:
     return {
         "structuredContent": {
             "revoked_count": revoked,
+            "revoke_failed": failed,
         },
         "content": summary,
     }
@@ -698,7 +703,7 @@ def main() -> None:
 # The private key is generated inside the Secure Enclave and is NON-EXTRACTABLE.
 # banto never returns key material. Signing raises a Touch ID / passcode prompt per
 # call (user presence), so an autonomous agent cannot mint a signature silently —
-# this is the "external root of trust" property (e.g. for v5 TCB rotation receipts).
+# this is the "external root of trust" property (e.g. for two-person rotation receipts).
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})

@@ -42,14 +42,6 @@ def test_classify_secret_known_and_unknown_cases():
     assert connect_webhook.provider == "stripe"
     assert connect_webhook.rotation_class == "manual_cutover"
 
-    projectc_hmac = classify_secret("projectc-hmac", "BAAS_FACTORY_HMAC_SECRET")
-    assert projectc_hmac.provider == "app"
-    assert projectc_hmac.rotation_class == "propagate_only"
-
-    projectc_security_flag = classify_secret("projectc-https", "BAAS_FACTORY_REQUIRE_HTTPS")
-    assert projectc_security_flag.provider == "app"
-    assert projectc_security_flag.rotation_class == "propagate_only"
-
     unknown = classify_secret("mystery", "MYSTERY_INTERNAL_TOKEN")
     assert unknown.rotation_class == "review_required"
 

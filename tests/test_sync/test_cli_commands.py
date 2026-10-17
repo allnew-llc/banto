@@ -60,7 +60,7 @@ class TestSyncAddEnvironments:
     def test_environments_saved_on_platform_target(self, tmp_path: Path):
         config_path = self._add(
             ["stripe", "--env", "STRIPE_SECRET_KEY",
-             "--target", "vercel:projecte-landing-page",
+             "--target", "vercel:my-project",
              "--environments", "production,preview"],
             tmp_path,
         )

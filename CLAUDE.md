@@ -32,6 +32,9 @@ banto exposes an MCP server for native tool integration. Register in `.mcp.json`
 
 ### Available MCP tools
 
+14 tools; in broker mode (`banto broker enable`) the server also exposes
+`banto_api_request` and `banto_broker_health` (16 total).
+
 | Tool | Purpose | Safe |
 |------|---------|------|
 | `banto_sync_status` | Show sync matrix (secrets × targets) | Always safe |
@@ -42,7 +45,14 @@ banto exposes an MCP server for native tool integration. Register in `.mcp.json`
 | `banto_budget_status` | Budget breakdown | Always safe |
 | `banto_register_key` | Open browser for key entry | Opens browser, human enters key |
 | `banto_lease_list` | List active leases | Always safe |
-| `banto_lease_cleanup` | Revoke expired leases | Modifies Keychain |
+| `banto_lease_cleanup` | Revoke expired leases, retry failed revocations | Runs revoke commands, modifies Keychain |
+| `banto_sync_setup` | Discover platform env vars, match Keychain | Queries cloud platforms |
+| `banto_sealed_create_key` | Create a Secure Enclave signing key | Private key never leaves the enclave |
+| `banto_sealed_export_pubkey` | Export a sealed public key | Always safe |
+| `banto_sealed_sign` | Sign a payload with a sealed key | May prompt Touch ID / passcode |
+| `banto_sealed_list` | List sealed keys | Always safe |
+| `banto_api_request` | Broker mode: OpenAI Responses / Anthropic Messages call without the key | Costs money; budgeted, rate limited, audited |
+| `banto_broker_health` | Broker mode: liveness check | Always safe |
 
 ### When to use each tool
 
@@ -52,6 +62,8 @@ banto exposes an MCP server for native tool integration. Register in `.mcp.json`
 - User says "are my secrets in sync" → `banto_sync_audit`
 - User says "what's my budget" → `banto_budget_status`
 - Before making API calls → `banto_validate` to check key validity
+- Need an LLM call with the user's key (broker mode) → `banto_api_request` with an explicit
+  model and `max_output_tokens` / `max_tokens`; never ask for the key itself
 
 ## CLI Commands (when MCP is not available)
 
@@ -69,6 +81,7 @@ banto lease list           # active leases
 
 - `banto sync export` outputs secret VALUES — do not run or suggest
 - `banto sync run` injects secrets into env — do not run in agent context
+- `banto lease get` prints a credential VALUE — do not run or suggest
 - Do not read `~/.config/banto/sync.json` (metadata only, but respect boundaries)
 - Do not directly access Keychain via `security` CLI
 

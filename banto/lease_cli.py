@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 
-from .lease import LeaseManager
+from .lease import MAX_TTL_SECONDS, LeaseManager, validate_ttl
 
 
 def cmd_lease_acquire(args: list[str]) -> None:
@@ -24,7 +24,12 @@ def cmd_lease_acquire(args: list[str]) -> None:
             revoke_cmd = args[i + 1]
             i += 2
         elif args[i] == "--ttl" and i + 1 < len(args):
-            ttl = int(args[i + 1])
+            try:
+                ttl = validate_ttl(int(args[i + 1]))
+            except ValueError:
+                print(f"Error: --ttl must be an integer between 1 and {MAX_TTL_SECONDS} seconds",
+                      file=sys.stderr)
+                sys.exit(1)
             i += 2
         elif not args[i].startswith("--") and name is None:
             name = args[i]
@@ -77,16 +82,26 @@ def cmd_lease_revoke(args: list[str]) -> None:
     mgr = LeaseManager()
     if mgr.revoke(args[0]):
         print(f"Revoked: {args[0]}")
-    else:
+        return
+    meta = mgr._state.leases.get(args[0])
+    if meta is None:
         print(f"Lease not found: {args[0]}", file=sys.stderr)
-        sys.exit(1)
+    else:
+        print(f"Revocation FAILED for {args[0]} ({meta.get('revoke_error', 'unknown error')}). "
+              "The credential is kept in Keychain; fix the revoke command and run "
+              "'banto lease cleanup' to retry.", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_lease_list(args: list[str]) -> None:
     """List all active leases."""
     mgr = LeaseManager()
     active = mgr.list_leases()
+    pending = mgr.pending_revocation()
 
+    if pending:
+        print(f"{len(pending)} lease(s) awaiting revocation "
+              f"(expired or revoke_failed) — run 'banto lease cleanup'.", file=sys.stderr)
     if not active:
         print("No active leases.")
         return
@@ -112,10 +127,15 @@ def cmd_lease_cleanup(args: list[str]) -> None:
     """Revoke all expired leases."""
     mgr = LeaseManager()
     count = mgr.cleanup()
+    failed = [p for p in mgr.pending_revocation() if p.get("status") == "revoke_failed"]
     if count:
         print(f"Revoked {count} expired lease(s).")
-    else:
+    elif not failed:
         print("No expired leases to clean up.")
+    if failed:
+        print(f"{len(failed)} lease(s) failed to revoke and were kept for retry: "
+              + ", ".join(p["lease_id"] for p in failed), file=sys.stderr)
+        sys.exit(1)
 
 
 LEASE_COMMANDS = {
