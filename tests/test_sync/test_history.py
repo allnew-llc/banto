@@ -6,7 +6,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from banto.sync.history import (
     HistoryStore,
     _fingerprint,
@@ -88,7 +87,6 @@ class TestHistoryStore:
 
     @patch("banto.sync.history.KeychainStore")
     def test_get_version_keychain_error(self, mock_kc_cls, tmp_path: Path):
-        from banto.keychain import KeyNotFoundError
         mock_kc = mock_kc_cls.return_value
         mock_kc.get.return_value = None  # KeychainStore.get returns None on not found
 

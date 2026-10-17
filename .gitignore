@@ -9,3 +9,6 @@ build/
 .env.*
 *.pem
 *.p12
+
+# Local tool caches (never commit; may contain account identifiers)
+.wrangler/

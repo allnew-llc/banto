@@ -4,7 +4,6 @@ import io
 import json
 import os
 from pathlib import Path
-import socket
 import threading
 from unittest.mock import Mock
 
@@ -189,7 +188,6 @@ def test_mcp_bridge_never_executes_original(monkeypatch):
 
 
 def test_registration_runs_in_service(monkeypatch):
-    from banto import mcp_server
     from banto import register_popup
     called = Mock(return_value="http://127.0.0.1:12345")
     monkeypatch.setattr(register_popup, "serve_register_popup", called)
