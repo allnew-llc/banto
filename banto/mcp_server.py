@@ -698,7 +698,7 @@ def main() -> None:
 # The private key is generated inside the Secure Enclave and is NON-EXTRACTABLE.
 # banto never returns key material. Signing raises a Touch ID / passcode prompt per
 # call (user presence), so an autonomous agent cannot mint a signature silently —
-# this is the "external root of trust" property (e.g. for v5 TCB rotation receipts).
+# this is the "external root of trust" property (e.g. for two-person rotation receipts).
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
