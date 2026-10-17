@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.0-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-5.2.2-0D3B66?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
-  <img src="https://img.shields.io/badge/230%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
+  <img src="https://img.shields.io/badge/497%20passed-0D3B66?style=flat-square&label=tests" alt="tests">
   <img src="https://img.shields.io/badge/33%20drivers-0D3B66?style=flat-square&label=platforms" alt="platforms">
-  <img src="https://img.shields.io/badge/10%20tools-262626?style=flat-square&label=MCP" alt="mcp">
+  <img src="https://img.shields.io/badge/14%20tools-262626?style=flat-square&label=MCP" alt="mcp">
 </p>
 
 > **番頭**（banto） -- 江戸時代の商家において蔵の鍵と帳簿を預かり、主人の留守にも商いの秩序を守った筆頭番頭に由来します。
@@ -165,21 +165,23 @@ BANTO SYNC VALIDATE — Testing 4 key(s)
 
 - macOS（シークレット管理にKeychainを使用）
 - Python 3.10+
-- 外部依存なし（MCPサーバー: `pip install banto[mcp]`）
+- 外部依存なし（MCPサーバー: `pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"`）
 
 ## ⚡ クイックスタート
 
 ### 1. インストール
 
 ```bash
-# pip
-pip install banto
+# banto は現在 PyPI では公開していません。GitHub リポジトリから直接インストールしてください。
 
 # uv（推奨）
-uv tool install banto
+uv tool install "git+https://github.com/allnew-llc/banto.git"
 
 # pipx
-pipx install banto
+pipx install "git+https://github.com/allnew-llc/banto.git"
+
+# pip
+pip install "git+https://github.com/allnew-llc/banto.git"
 
 # ソースからインストール
 git clone https://github.com/allnew-llc/banto.git
@@ -187,7 +189,7 @@ cd banto
 pip install -e .
 
 # MCPサーバーサポート付き
-pip install banto[mcp]
+pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
 ### 2. プラットフォームに同期 — 1コマンド
@@ -304,7 +306,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 
 ## 🤖 MCPサーバー
 
-bantoはMCPサーバーを公開し、AIエージェントがシークレット管理を行えるようにします。エージェントがシークレット値を受け取ることはありません — すべてのツールはメタデータのみを返します。
+bantoはMCPサーバーを公開し、AIエージェントがシークレット管理を行えるようにします。エージェントがシークレット値を受け取ることはありません — 同期・検証系ツールはメタデータのみを返し、sealed 署名系ツールは公開鍵または署名のみを返します（秘密鍵・シークレット値は返しません）。
 
 ### Claude Code
 
@@ -324,7 +326,7 @@ bantoはMCPサーバーを公開し、AIエージェントがシークレット�
 オプションのMCP依存パッケージが必要です:
 
 ```bash
-pip install banto[mcp]
+pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
 ### ChatGPT
@@ -358,6 +360,11 @@ banto-mcp --transport http --port 8385 # HTTP (production / ChatGPT)
 | `banto_register_key` | キー入力用ブラウザポップアップを起動 | 人間が値を入力 |
 | `banto_lease_list` | アクティブなリースの一覧 | 読み取り専用 |
 | `banto_lease_cleanup` | 期限切れリースの失効 | Keychainを変更 |
+| `banto_sync_setup` | プラットフォームの環境変数を検出し Keychain と照合 | クラウドに問い合わせ |
+| `banto_sealed_create_key` | Secure Enclave で保護された署名鍵を作成 | 秘密鍵はエンクレーブ外に出ません |
+| `banto_sealed_export_pubkey` | sealed 鍵の公開鍵を出力 | 読み取り専用 |
+| `banto_sealed_sign` | sealed 鍵でペイロードに署名 | user-presence 鍵では Touch ID / パスコード確認 |
+| `banto_sealed_list` | sealed 鍵の一覧 | 読み取り専用 |
 
 すべてのツールにOpenAI互換アノテーション（`readOnlyHint`、`destructiveHint`、`openWorldHint`）が含まれます。
 

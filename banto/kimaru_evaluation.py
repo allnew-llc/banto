@@ -201,7 +201,6 @@ class Transport:
             raise EvaluationError('R0_REMOTE_HTTP_'+str(status)+'_OUTCOME_UNKNOWN') from None
         except (OSError,ValueError): raise EvaluationError('R0_REMOTE_FAILED_OR_UNKNOWN') from None
     def prepare(self,provider):
-        from .broker import observe_secret
         if provider=='azure':
             arm={'Authorization':'Bearer '+self.token('https://management.azure.com/')}
             account=self.request('GET','https://management.azure.com'+AZURE_ID+'?api-version=2025-06-01',arm)

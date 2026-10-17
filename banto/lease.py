@@ -37,7 +37,7 @@ import os
 import shlex
 import subprocess
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

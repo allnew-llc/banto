@@ -7,12 +7,11 @@ import json
 import threading
 import time
 from http.client import HTTPConnection
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from banto.sync.config import SecretEntry, Target, SyncConfig
-from banto.sync.web import SyncUIHandler, _build_config_json, _build_status_json, serve
+from banto.sync.web import _build_config_json, _build_status_json, serve
 
 
 @pytest.fixture

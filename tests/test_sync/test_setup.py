@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from banto.sync.config import SecretEntry, SyncConfig, Target
 from banto.sync.setup import (
     ENV_TO_KEYCHAIN,

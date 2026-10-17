@@ -14,7 +14,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from banto import SecureVault, BudgetExceededError, KeyNotFoundError
+from banto import SecureVault, BudgetExceededError
 from banto.keychain import KeychainStore
 
 
@@ -50,7 +50,7 @@ def main():
     )
 
     print("=== Banto Budget Guard Demo ===\n")
-    print(f"Budget: $0.10 (intentionally tiny)\n")
+    print("Budget: $0.10 (intentionally tiny)\n")
 
     # --- Simulate API calls until budget runs out ---
     call_count = 0
@@ -81,21 +81,21 @@ def main():
                 f"  Call {call_count}: BLOCKED  "
                 f"(remaining=${e.remaining:.4f}, requested=${e.requested:.4f})"
             )
-            print(f"\n  The key was never returned. The agent cannot call the API.")
+            print("\n  The key was never returned. The agent cannot call the API.")
             break
 
     # --- Final status ---
     status = vault.get_budget_status()
-    print(f"\n=== Final Status ===")
+    print("\n=== Final Status ===")
     print(f"  Calls made:  {call_count - 1}")
-    print(f"  Calls blocked: 1")
+    print("  Calls blocked: 1")
     print(f"  Used:  ${status['used_usd']:.4f}")
     print(f"  Limit: ${status['monthly_limit_usd']:.2f}")
 
     # --- Cleanup ---
     ks.delete("openai")
     shutil.rmtree(tmp_dir)
-    print(f"\n  (demo keys and data cleaned up)")
+    print("\n  (demo keys and data cleaned up)")
 
 
 if __name__ == "__main__":

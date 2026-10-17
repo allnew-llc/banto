@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from inspect import signature
 from pathlib import Path
 
-from ..keychain import KeychainStore, KeyNotFoundError
+from ..keychain import KeychainStore, KeyNotFoundError  # noqa: F401  (re-exported)
 from . import audit
 from .config import SecretEntry, SyncConfig, Target
 from .drivers import get_driver

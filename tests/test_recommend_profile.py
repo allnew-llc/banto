@@ -1,7 +1,6 @@
 """Tests for CostGuard.recommend_profile()."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest

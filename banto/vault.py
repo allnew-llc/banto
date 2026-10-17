@@ -21,7 +21,7 @@ import threading
 from pathlib import Path
 
 from .backend import SecretBackend
-from .guard import CostGuard, BudgetExceededError
+from .guard import BudgetExceededError, CostGuard  # noqa: F401  (re-exported for callers)
 from .keychain import KeychainStore, KeyNotFoundError
 from .profiles import ProfileManager
 

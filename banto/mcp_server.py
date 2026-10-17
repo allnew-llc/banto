@@ -91,7 +91,7 @@ async def banto_sync_status() -> dict:
 @mcp.tool(annotations={
     "readOnlyHint": False,
     "destructiveHint": True,
-    "openWorldHint": False,
+    "openWorldHint": True,
 })
 async def banto_sync_push(name: str = "") -> dict:
     """Push secrets from Keychain to cloud targets.
@@ -452,7 +452,7 @@ async def banto_budget_status() -> dict:
 @mcp.tool(annotations={
     "readOnlyHint": False,
     "destructiveHint": False,
-    "openWorldHint": False,
+    "openWorldHint": True,
 })
 async def banto_sync_setup(
     platform: str, project: str, dry_run: bool = False, guess: bool = False,
@@ -559,7 +559,7 @@ async def banto_register_key(provider: str = "") -> dict:
             "status": "popup_opened",
         },
         "content": (
-            f"Browser opened for key registration"
+            "Browser opened for key registration"
             + (f" (provider: {provider})" if provider else "")
             + f". URL: {url}"
         ),

@@ -2,7 +2,6 @@
 import copy
 from datetime import datetime, timedelta, timezone
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -182,7 +181,7 @@ def test_fixed_azure_arm_identity_model_version_and_sku_are_checked_without_post
 
 
 def test_real_unix_socket_dispatch_reserves_before_fake_provider_and_redacts(environment):
-    import socket,threading,tempfile
+    import threading,tempfile
     from banto.broker_client import BrokerClient
     directory,p,g=environment;t=Transport(directory,g)
     original=e.generate
