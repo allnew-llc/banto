@@ -165,30 +165,34 @@ BANTO SYNC VALIDATE — Testing 4 key(s)
 
 - macOS（シークレット管理にKeychainを使用）
 - Python 3.10+
-- 外部依存なし（MCPサーバー: `pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"`）
+- 外部依存なし（MCPサーバー: `pip install "banto[mcp]"`）
 
 ## ⚡ クイックスタート
 
 ### 1. インストール
 
 ```bash
-# banto は現在 PyPI では公開していません。GitHub リポジトリから直接インストールしてください。
-
 # uv（推奨）
-uv tool install "git+https://github.com/allnew-llc/banto.git"
+uv tool install banto
 
 # pipx
-pipx install "git+https://github.com/allnew-llc/banto.git"
+pipx install banto
 
 # pip
-pip install "git+https://github.com/allnew-llc/banto.git"
+pip install banto
+
+# MCPサーバーサポート付き
+pip install "banto[mcp]"
 
 # ソースからインストール
 git clone https://github.com/allnew-llc/banto.git
 cd banto
 pip install -e .
 
-# MCPサーバーサポート付き
+# 最新の開発版（GitHub）
+uv tool install "git+https://github.com/allnew-llc/banto.git"
+pipx install "git+https://github.com/allnew-llc/banto.git"
+pip install "git+https://github.com/allnew-llc/banto.git"
 pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
@@ -326,7 +330,7 @@ bantoはMCPサーバーを公開し、AIエージェントがシークレット�
 オプションのMCP依存パッケージが必要です:
 
 ```bash
-pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
+pip install "banto[mcp]"
 ```
 
 ### ChatGPT
