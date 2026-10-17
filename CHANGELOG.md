@@ -24,7 +24,7 @@
 
 ### Removed
 
-- Client-specific code and documents that do not belong in the public package: the Kimaru evaluation/material broker operations (`kimaru_*`), the QuickTrust validator and `banto sync quicktrust-credential` wrapper (now a stub pointing to `banto sync browser-issue`), POIPOI rotation rules, and an internal Vercel rotation run log. Generic browser-recipe issuance covers the same flows. Note: these files remain in git history and in the 5.2.x sdists/wheels on PyPI
+- Client-specific code and documents that do not belong in the public package (provider-specific broker operations, validators, credential wrappers, rotation rules and an internal rotation run log) were removed. Generic browser-recipe issuance (`banto sync browser-issue`) covers the same flows. Note: these files remain in git history and in the 5.2.x sdists/wheels on PyPI
 
 ### Documentation
 
