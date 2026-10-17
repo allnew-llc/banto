@@ -182,6 +182,7 @@ class TestLeaseManager:
         mgr._state.leases[info1.lease_id]["expires_at"] = (
             datetime.now(timezone.utc) - timedelta(hours=1)
         ).isoformat()
+        mgr._state.save(mgr._state_path)  # cleanup() re-reads state under a lock
 
         count = mgr.cleanup()
         assert count == 1
@@ -265,3 +266,156 @@ class TestVaultNoBudget:
         vault = SecureVault(budget=False, backend=mock_backend)
         with pytest.raises(ValueError):
             vault.get_key()
+
+
+# ── 5.3.0: revocation correctness, atomic state, TTL bounds ──────
+
+
+class _FakeKeychain:
+    def __init__(self, *args, **kwargs):
+        self.items: dict[str, str] = {}
+
+    def store(self, name, value):
+        self.items[name] = value
+        return True
+
+    def get(self, name):
+        return self.items.get(name)
+
+    def delete(self, name):
+        return self.items.pop(name, None) is not None
+
+
+@pytest.fixture
+def real_mgr(tmp_path, monkeypatch):
+    monkeypatch.setattr("banto.lease.KeychainStore", _FakeKeychain)
+    return LeaseManager(state_path=tmp_path / "state.json")
+
+
+def test_revoke_cmd_expands_lease_value_via_shell(real_mgr, tmp_path):
+    out = tmp_path / "revoked.txt"
+    info = real_mgr.acquire(
+        name="k", ttl_seconds=60, cmd="echo FAKE_LEASE_VALUE",
+        revoke_cmd=f'sh -c \'true\' && printf %s "$BANTO_LEASE_VALUE" > {out}',
+    )
+    assert real_mgr.revoke(info.lease_id) is True
+    assert out.read_text() == "FAKE_LEASE_VALUE"
+    assert real_mgr._state.leases[info.lease_id]["status"] == "revoked"
+    assert real_mgr._kc.get(info.lease_id) is None
+
+
+def test_revoke_argv_value_never_in_banto_argv():
+    from banto.lease import revoke_argv
+    argv = revoke_argv("delete-key --id $BANTO_LEASE_VALUE --lease {lease_id}", "lease-1")
+    assert argv == ["/bin/sh", "-c", "delete-key --id $BANTO_LEASE_VALUE --lease lease-1"]
+    assert revoke_argv("delete-key ${BANTO_LEASE_VALUE}", "x")[0] == "/bin/sh"
+    assert revoke_argv("delete-key --lease {lease_id}", "lease-2") == ["delete-key", "--lease", "lease-2"]
+
+
+def test_failed_revoke_is_kept_and_retried(real_mgr, tmp_path):
+    flag = tmp_path / "allow"
+    info = real_mgr.acquire(
+        name="k", ttl_seconds=60, cmd="echo FAKE",
+        revoke_cmd=f'test -e {flag} && echo "$BANTO_LEASE_VALUE" >/dev/null',
+    )
+    assert real_mgr.revoke(info.lease_id) is False
+    meta = real_mgr._state.leases[info.lease_id]
+    assert meta["status"] == "revoke_failed"
+    assert meta["revoke_error"].startswith("exit ")
+    assert meta["revoke_attempts"] == 1
+    assert real_mgr._kc.get(info.lease_id) == "FAKE"  # credential kept for retry
+    assert real_mgr.get_value(info.lease_id) is None
+    assert [p["lease_id"] for p in real_mgr.pending_revocation()] == [info.lease_id]
+
+    assert real_mgr.cleanup() == 0  # still failing
+    assert real_mgr._state.leases[info.lease_id]["revoke_attempts"] == 2
+    flag.touch()
+    assert real_mgr.cleanup() == 1
+    assert real_mgr._state.leases[info.lease_id]["status"] == "revoked"
+    assert real_mgr._kc.get(info.lease_id) is None
+    assert real_mgr.pending_revocation() == []
+
+
+def test_list_leases_has_no_side_effects(real_mgr, tmp_path):
+    marker = tmp_path / "ran"
+    info = real_mgr.acquire(name="k", ttl_seconds=60, cmd="echo FAKE", revoke_cmd=f"touch {marker}")
+    real_mgr._state.leases[info.lease_id]["expires_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+    real_mgr._state.save(real_mgr._state_path)
+    assert real_mgr.list_leases() == []
+    assert not marker.exists()
+    assert real_mgr._state.leases[info.lease_id]["status"] == "active"
+    assert real_mgr._kc.get(info.lease_id) == "FAKE"
+    assert real_mgr.pending_revocation()[0]["lease_id"] == info.lease_id
+
+
+@pytest.mark.parametrize("ttl", [0, -5, 7 * 24 * 3600 + 1, 1.5, True, "60"])
+def test_ttl_validated(real_mgr, ttl):
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        real_mgr.acquire(name="k", ttl_seconds=ttl, cmd="echo FAKE")
+    assert real_mgr._state.leases == {}
+
+
+def test_state_save_is_atomic_and_private(tmp_path, monkeypatch):
+    import os
+    import stat
+    path = tmp_path / "state.json"
+    LeaseState(leases={"a": {"status": "active"}}).save(path)
+
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr("banto.lease.os.replace", boom)
+    with pytest.raises(OSError):
+        LeaseState(leases={"b": {}}).save(path)
+    assert LeaseState.load(path).leases == {"a": {"status": "active"}}  # old file intact
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]  # temp removed
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+def test_concurrent_managers_do_not_lose_updates(tmp_path, monkeypatch):
+    monkeypatch.setattr("banto.lease.KeychainStore", _FakeKeychain)
+    first = LeaseManager(state_path=tmp_path / "state.json")
+    second = LeaseManager(state_path=tmp_path / "state.json")  # loaded before first writes
+    a = first.acquire(name="a", ttl_seconds=60, cmd="echo A")
+    b = second.acquire(name="b", ttl_seconds=60, cmd="echo B")
+    on_disk = LeaseState.load(tmp_path / "state.json").leases
+    assert {a.lease_id, b.lease_id} <= set(on_disk)
+
+
+def test_cli_ttl_and_revoke_failure_exit_nonzero(tmp_path, monkeypatch, capsys):
+    from banto import lease_cli
+    monkeypatch.setattr("banto.lease.KeychainStore", _FakeKeychain)
+    monkeypatch.setattr("banto.lease.DEFAULT_LEASE_STATE_PATH", tmp_path / "state.json")
+    with pytest.raises(SystemExit) as exc:
+        lease_cli.cmd_lease_acquire(["k", "--cmd", "echo FAKE", "--ttl", "-1"])
+    assert exc.value.code == 1
+    with pytest.raises(SystemExit) as exc:
+        lease_cli.cmd_lease_acquire(["k", "--cmd", "echo FAKE", "--ttl", "abc"])
+    assert exc.value.code == 1
+
+    mgr = LeaseManager(state_path=tmp_path / "state.json")
+    info = mgr.acquire(name="k", ttl_seconds=60, cmd="echo FAKE", revoke_cmd="false")
+    monkeypatch.setattr(lease_cli, "LeaseManager", lambda: LeaseManager(state_path=tmp_path / "state.json"))
+    with pytest.raises(SystemExit) as exc:
+        lease_cli.cmd_lease_revoke([info.lease_id])
+    assert exc.value.code == 1
+    assert "FAILED" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        lease_cli.cmd_lease_cleanup([])
+    assert exc.value.code == 1
+
+
+def test_mcp_lease_annotations_and_pending(tmp_path, monkeypatch):
+    import asyncio
+    from banto import mcp_server
+    tools = {t.name: t for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert tools["banto_lease_list"].annotations.readOnlyHint is True
+    assert tools["banto_lease_cleanup"].annotations.openWorldHint is True
+    monkeypatch.setattr("banto.lease.KeychainStore", _FakeKeychain)
+    monkeypatch.setattr("banto.lease.DEFAULT_LEASE_STATE_PATH", tmp_path / "state.json")
+    mgr = LeaseManager()
+    info = mgr.acquire(name="k", ttl_seconds=60, cmd="echo FAKE", revoke_cmd="false")
+    mgr.revoke(info.lease_id)
+    result = asyncio.run(mcp_server.banto_lease_list())
+    assert result["structuredContent"]["pending_revocation"][0]["status"] == "revoke_failed"
+    assert "FAKE" not in str(result)
