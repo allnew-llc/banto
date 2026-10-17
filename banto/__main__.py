@@ -539,7 +539,7 @@ def main() -> None:
         print("Usage: banto <command> [args]")
         print("       banto --version | -V\n")
         print("Commands:")
-        print("  broker <cmd>        Common Keychain process: install, health, enable, call")
+        print("  broker <cmd>        Common Keychain process: install, health, enable, disable, call, audit")
         print("  status              Show budget status (with per-provider/model breakdown)")
         print("  budget [args]       View or set budget limits")
         print("  profile [name]      Show or set the active model profile")

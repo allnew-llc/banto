@@ -198,11 +198,15 @@ def test_http_bridge_requires_token_and_configures_settings(monkeypatch, capsys)
     assert token not in captured.out + captured.err
 
 
-def test_budget_cannot_be_bypassed(monkeypatch):
+def test_budget_enabled_reserves_instead_of_bypassing(monkeypatch):
+    """Budget mode never reaches the key without a reservation (see test_broker_budget)."""
     from banto.vault import SecureVault
-    monkeypatch.setattr(SecureVault, "_try_auto_budget", lambda self: setattr(self, "_guard", object()))
-    with pytest.raises(BrokerError, match="budget_enabled"):
+    monkeypatch.setattr(SecureVault, "_try_auto_budget", lambda self: setattr(self, "_guard", Mock(pricing={})))
+    get = Mock(side_effect=AssertionError("must not read"))
+    monkeypatch.setattr(keychain.KeychainStore, "get", get)
+    with pytest.raises(BrokerError, match="budget_requires_max_output_tokens"):
         broker.api_request("openai", {"model": "fixture"})
+    get.assert_not_called()
 
 
 def test_mcp_bridge_never_executes_original(monkeypatch):
