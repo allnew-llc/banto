@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 5.2.3 (2026-10-17)
+
+### Fixed
+
+- **Python 3.10 compatibility**: fall back to `tomli` when `tomllib` (3.11+) is unavailable; `tomli` is a dependency only for `python_version < "3.11"`
+- **Broker client**: could misreport `peer_denied` as `broker_unavailable` when the broker closed the connection early (the client now reads the broker's reply after a broken pipe on send). Regression test added
+
+## 5.2.2 additional changes (included in the 5.2.2 PyPI release, tag v5.2.2)
 
 ### Security
 
