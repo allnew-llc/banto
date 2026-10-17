@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.3-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-5.2.4-0D3B66?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
@@ -234,7 +234,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 ## 💻 CLI reference
 
 <details>
-<summary><strong>Core commands (9)</strong></summary>
+<summary><strong>Core commands (10)</strong></summary>
 
 | Command | Description |
 |---------|-------------|
@@ -247,6 +247,7 @@ banto budget --provider openai 30    # $30/month for OpenAI
 | `banto list` | List stored keys and budget summary |
 | `banto check <model> ...` | Dry-run budget check (`--tokens`, `--n`, `--seconds`, `--quality`, `--size`) |
 | `banto init` | Copy default config to `~/.config/banto/` |
+| `banto version` | Print the installed version (`banto --version` / `banto -V` also work, including in broker mode) |
 
 </details>
 

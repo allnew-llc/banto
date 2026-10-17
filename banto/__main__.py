@@ -11,6 +11,7 @@ Commands:
     list                List stored provider keys
     check <model> ...   Dry-run budget check for a model
     init                Copy default config to ~/.config/banto/
+    version             Show the installed version (also --version, -V)
 """
 
 import getpass
@@ -475,6 +476,15 @@ def cmd_sealed(args: list[str]) -> None:
     cmd_sealed_dispatch(args)
 
 
+def _print_version() -> None:
+    from . import __version__
+    print(f"banto {__version__}")
+
+
+def cmd_version(args: list[str]) -> None:
+    _print_version()
+
+
 def cmd_chatgpt(args: list[str]) -> None:
     if not args or args[0] in ("-h", "--help"):
         print("banto chatgpt: Connect banto to ChatGPT\n")
@@ -503,10 +513,18 @@ COMMANDS = {
     "lease": cmd_lease,
     "sealed": cmd_sealed,
     "chatgpt": cmd_chatgpt,
+    "version": cmd_version,
 }
+
+VERSION_FLAGS = ("--version", "-V", "version")
 
 
 def main() -> None:
+    # Handled before broker routing so it works in broker mode too and never
+    # touches Keychain, the broker socket, or config files.
+    if len(sys.argv) > 1 and sys.argv[1] in VERSION_FLAGS:
+        _print_version()
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "broker":
         from .broker import main as broker_main
         sys.argv.pop(1)
@@ -518,7 +536,8 @@ def main() -> None:
             return
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("banto: Budget-gated API key vault for LLM applications\n")
-        print("Usage: banto <command> [args]\n")
+        print("Usage: banto <command> [args]")
+        print("       banto --version | -V\n")
         print("Commands:")
         print("  broker <cmd>        Common Keychain process: install, health, enable, call")
         print("  status              Show budget status (with per-provider/model breakdown)")
@@ -534,6 +553,7 @@ def main() -> None:
         print("  lease <cmd>         Dynamic secrets with TTL and auto-revoke")
         print("  sealed <cmd>        Secure Enclave sealed signing (non-extractable keys)")
         print("  chatgpt connect     Connect banto to ChatGPT (starts tunnel)")
+        print("  version             Show the installed version (also --version, -V)")
         print()
         print("Budget examples:")
         print("  banto budget                          Show all limits")

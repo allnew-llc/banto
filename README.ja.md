@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.2.3-0D3B66?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-5.2.4-0D3B66?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-0D3B66?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/license-Dual-262626?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/stdlib%20only-262626?style=flat-square&label=dependencies" alt="dependencies">
@@ -234,7 +234,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 ## 💻 CLIリファレンス
 
 <details>
-<summary><strong>コアコマンド (9)</strong></summary>
+<summary><strong>コアコマンド (10)</strong></summary>
 
 | コマンド | 説明 |
 |---------|------|
@@ -247,6 +247,7 @@ banto budget --provider openai 30    # OpenAI $30/月
 | `banto list` | 登録済みキーと予算の一覧 |
 | `banto check <model> ...` | コスト見積もりのドライラン（`--tokens`、`--n`、`--seconds`、`--quality`、`--size`） |
 | `banto init` | デフォルト設定を `~/.config/banto/` にコピー |
+| `banto version` | インストール済みのバージョンを表示（`banto --version` / `banto -V` も可。ブローカーモードでも動作） |
 
 </details>
 

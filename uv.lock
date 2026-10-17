@@ -36,7 +36,7 @@ wheels = [
 
 [[package]]
 name = "banto"
-version = "5.2.3"
+version = "5.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
