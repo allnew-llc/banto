@@ -51,6 +51,40 @@ def test_other_uid_denied(local_server, monkeypatch):
         client.call("health")
 
 
+def test_reply_read_when_broker_closes_before_request(monkeypatch):
+    import socket
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="banto-", dir="/tmp") as directory:
+        path = Path(directory) / "b.sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        os.chmod(path, 0o600)
+        listener.listen(1)
+        closed = threading.Event()
+        encode = broker_client.encode_message
+
+        def deny_and_close():
+            connection, _ = listener.accept()
+            connection.sendall(encode({"ok": False, "error": "peer_denied"}))
+            connection.close()
+            closed.set()
+
+        thread = threading.Thread(target=deny_and_close, daemon=True)
+        thread.start()
+
+        def encode_after_close(value):
+            assert closed.wait(5)
+            return encode(value)
+
+        monkeypatch.setattr(broker_client, "encode_message", encode_after_close)
+        try:
+            with pytest.raises(BrokerError, match="peer_denied"):
+                BrokerClient(path).call("health")
+        finally:
+            thread.join(5)
+            listener.close()
+
+
 def test_exception_does_not_leak(local_server):
     server, client = local_server
     def fail(*args):
