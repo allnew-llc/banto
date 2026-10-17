@@ -45,7 +45,10 @@ def json_update(text: str, entry: dict) -> str:
 
 
 def toml_update(text: str, command: str) -> str:
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10: tomllib was added in 3.11
+        import tomli as tomllib
     parsed = tomllib.loads(text)
     entry = {"command": command, "args": [], "enabled": True}
     existing = parsed.get("mcp_servers", {}).get("banto")
