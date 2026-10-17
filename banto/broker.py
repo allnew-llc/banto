@@ -247,10 +247,9 @@ def _dispatch(operation: str, arguments: dict) -> dict:
                 "protocol": 1, "direct_banto_access_blocked": (runtime_dir() / "required").exists()}
     if operation == "api_request":
         return api_request(**arguments)
-    if operation in ("register_asc", "register_x_oauth") and not arguments:
+    if operation == "register_asc" and not arguments:
         from . import register_popup
-        name = "serve_asc_register_popup" if operation == "register_asc" else "serve_x_oauth_register_popup"
-        return {"url": getattr(register_popup, name)(blocking=False), "status": "popup_opened"}
+        return {"url": register_popup.serve_asc_register_popup(blocking=False), "status": "popup_opened"}
     if operation not in MCP_OPERATIONS:
         raise BrokerError("operation_not_allowed")
     from . import mcp_server

@@ -10,6 +10,7 @@ import json
 import math
 import stat
 import os
+import shutil
 import sys
 import threading
 import uuid
@@ -77,6 +78,42 @@ def _resolve_config_path(config_path: str | None) -> Path:
     if user_config.exists():
         return user_config
     return Path(__file__).parent / "config.json"
+
+
+BUNDLED_CONFIG = Path(__file__).parent / "config.json"
+
+
+def ensure_user_config() -> Path:
+    """Return ~/.config/banto/config.json, copying the bundled default if missing.
+
+    Settings must never be written into the installed package directory.
+    """
+    user_config = CONFIG_DIR / "config.json"
+    if not user_config.exists():
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(BUNDLED_CONFIG, user_config)
+        user_config.chmod(0o640)
+    return user_config
+
+
+def update_config_file(config_path: Path, fn) -> dict:
+    """Locked read-modify-write of a config JSON file; ``fn`` mutates the dict."""
+    fd = os.open(str(config_path), os.O_RDWR | os.O_CREAT, 0o640)
+    try:
+        if sys.platform == "win32":
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        raw = os.read(fd, 10_000_000)
+        config = json.loads(raw.decode("utf-8")) if raw else {}
+        fn(config)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, json.dumps(config, indent=2, ensure_ascii=False).encode("utf-8"))
+        os.write(fd, b"\n")
+        return config
+    finally:
+        os.close(fd)
 
 
 def _resolve_pricing_path(config_dir: Path, pricing_file: str | None) -> Path:
@@ -847,6 +884,9 @@ class CostGuard:
         if model is not None and model.startswith("_"):
             raise ValueError(f"Invalid model name: {model}")
 
+        if self.config_path.resolve() == BUNDLED_CONFIG.resolve():
+            # First write: persist to the user config, not site-packages.
+            self.config_path = ensure_user_config()
         config_path = self.config_path
         fd = os.open(str(config_path), os.O_RDWR | os.O_CREAT, 0o640)
         try:
