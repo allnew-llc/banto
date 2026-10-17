@@ -165,30 +165,34 @@ BANTO SYNC VALIDATE — Testing 4 key(s)
 
 - macOS (uses Keychain for secret storage)
 - Python 3.10+
-- No external dependencies (MCP server: `pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"`)
+- No external dependencies (MCP server: `pip install "banto[mcp]"`)
 
 ## ⚡ Quick start
 
 ### 1. Install
 
 ```bash
-# banto is not published on PyPI yet. Install directly from the GitHub repository.
-
 # uv (recommended)
-uv tool install "git+https://github.com/allnew-llc/banto.git"
+uv tool install banto
 
 # pipx
-pipx install "git+https://github.com/allnew-llc/banto.git"
+pipx install banto
 
 # pip
-pip install "git+https://github.com/allnew-llc/banto.git"
+pip install banto
+
+# With MCP server support
+pip install "banto[mcp]"
 
 # From source
 git clone https://github.com/allnew-llc/banto.git
 cd banto
 pip install -e .
 
-# With MCP server support
+# Latest development version from GitHub
+uv tool install "git+https://github.com/allnew-llc/banto.git"
+pipx install "git+https://github.com/allnew-llc/banto.git"
+pip install "git+https://github.com/allnew-llc/banto.git"
 pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
 ```
 
@@ -330,7 +334,7 @@ Add to your `.mcp.json`:
 Requires the optional MCP dependency:
 
 ```bash
-pip install "banto[mcp] @ git+https://github.com/allnew-llc/banto.git"
+pip install "banto[mcp]"
 ```
 
 ### ChatGPT
