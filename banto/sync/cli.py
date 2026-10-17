@@ -4003,6 +4003,11 @@ SYNC_COMMANDS = {
     "ui": cmd_sync_ui,
 }
 
+# Kept only so old invocations print a pointer; not documented.
+REMOVED_SYNC_COMMANDS = frozenset({
+    "quicktrust-credential", "quicktrust-api-key", "quicktrust-webhook-secret",
+})
+
 
 def cmd_sync_dispatch(args: list[str]) -> None:
     """Dispatch banto sync <subcommand>."""
