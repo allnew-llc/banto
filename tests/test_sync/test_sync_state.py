@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
-from banto.sync.sync_state import SyncState, fingerprint, PushRecord
+from banto.sync.sync_state import SyncState, fingerprint
 
 
 class TestFingerprint:

@@ -13,6 +13,7 @@ Usage:
     serve_register_popup(provider_hint="openai", blocking=True)
 """
 
+import hmac
 import json
 import secrets
 import threading
@@ -1130,12 +1131,24 @@ class _RegisterHandler(BaseHTTPRequestHandler):
         }
         return origin in allowed
 
+    def _check_host(self) -> bool:
+        """Reject requests whose Host header is not a loopback name (DNS rebinding defense)."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        allowed = {
+            f"127.0.0.1:{self.server_port}",
+            f"localhost:{self.server_port}",
+        }
+        return host in allowed
+
     def _check_csrf(self) -> bool:
         """Validate X-CSRF-Token header against session token."""
         token = self.headers.get("X-CSRF-Token", "")
-        return token == self.csrf_token
+        return bool(self.csrf_token) and hmac.compare_digest(token.encode("utf-8"), self.csrf_token.encode("utf-8"))
 
     def do_GET(self) -> None:
+        if not self._check_host():
+            self.send_error(403, "Forbidden: invalid Host header")
+            return
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             body = self.html_content.encode("utf-8")
@@ -1151,6 +1164,9 @@ class _RegisterHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        if not self._check_host():
+            self.send_error(403, "Forbidden: invalid Host header")
+            return
         path = urlparse(self.path).path
         if path not in ("/register", "/register-many"):
             self.send_error(404)

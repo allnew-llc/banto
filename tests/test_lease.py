@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from banto.lease import LeaseInfo, LeaseManager, LeaseState
+from banto.lease import LeaseManager, LeaseState
 
 
 class TestLeaseState:

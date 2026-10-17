@@ -12,6 +12,7 @@ back to the browser.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import re
 import secrets
@@ -19,7 +20,7 @@ import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from ..keychain import KeychainStore, _ctypes_get
 from .config import DEFAULT_CONFIG_PATH, SecretEntry, SyncConfig, Target
@@ -1390,10 +1391,19 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         }
         return origin in allowed
 
+    def _check_host(self) -> bool:
+        """Reject requests whose Host header is not a loopback name (DNS rebinding defense)."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        allowed = {
+            f"127.0.0.1:{self.server_port}",
+            f"localhost:{self.server_port}",
+        }
+        return host in allowed
+
     def _check_csrf(self) -> bool:
         """Validate X-CSRF-Token header against session token."""
         token = self.headers.get("X-CSRF-Token", "")
-        return token == self.csrf_token
+        return bool(self.csrf_token) and hmac.compare_digest(token.encode("utf-8"), self.csrf_token.encode("utf-8"))
 
     def _reject(self, code: int, message: str) -> None:
         body = json.dumps({"ok": False, "error": message}).encode("utf-8")
@@ -1404,9 +1414,11 @@ class SyncUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
+        if not self._check_host():
+            self.send_error(403, "Forbidden: invalid Host header")
+            return
         parsed = urlparse(self.path)
         path = parsed.path
-        params = parse_qs(parsed.query)
 
         if path == "/" or path == "/index.html":
             self.send_response(200)
@@ -1430,6 +1442,9 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):  # noqa: N802
+        if not self._check_host():
+            self.send_error(403, "Forbidden: invalid Host header")
+            return
         # Origin check — reject cross-origin POST requests
         if not self._check_origin():
             self._reject(403, "Forbidden: invalid Origin")
@@ -1765,22 +1780,9 @@ class SyncUIHandler(BaseHTTPRequestHandler):
             val = kc.get(entry.account)
             secrets[entry.env_name] = val or ""
 
-        content = ""
-        if fmt == "env":
-            lines = []
-            for k, v in secrets.items():
-                if "\n" in v or "#" in v or " " in v:
-                    v = '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
-                lines.append(f"{k}={v}")
-            content = "\n".join(lines)
-        elif fmt == "json":
-            content = json.dumps(secrets, indent=2, ensure_ascii=False)
-        elif fmt == "docker":
-            lines = []
-            for k, v in secrets.items():
-                lines.append(f"{k}={v}")
-            content = "\n".join(lines)
-        else:
+        # Only masked previews are ever returned; unmasked values are not
+        # serialised here (dead code that built a plaintext copy was removed).
+        if fmt not in ("env", "json", "docker"):
             self._json_response({"error": f"Unknown format: {fmt}"})
             return
 

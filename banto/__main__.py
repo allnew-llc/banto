@@ -31,7 +31,6 @@ def _json_out(data: dict | list) -> None:
     """Print JSON to stdout and exit."""
     print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
 from .keychain import KeychainStore, _validate_provider
-from .profiles import ProfileManager
 from .sync.config import SyncConfig
 from .vault import SecureVault
 
@@ -121,7 +120,7 @@ def cmd_status(args: list[str]) -> None:
     # Provider breakdown
     by_provider = s.get("by_provider", {})
     if by_provider:
-        print(f"\nBy provider:")
+        print("\nBy provider:")
         for p, info in sorted(by_provider.items()):
             used = info["used_usd"]
             limit = info["limit_usd"]
@@ -133,7 +132,7 @@ def cmd_status(args: list[str]) -> None:
     # Model breakdown
     by_model = s.get("by_model", {})
     if by_model:
-        print(f"\nBy model:")
+        print("\nBy model:")
         for m, info in sorted(by_model.items()):
             used = info["used_usd"]
             limit = info["limit_usd"]
@@ -330,11 +329,11 @@ def cmd_budget(args: list[str]) -> None:
         s = guard.get_remaining_budget()
         print(f"Global:    ${s['monthly_limit_usd']:.2f}")
         if s["provider_limits"]:
-            print(f"\nProvider limits:")
+            print("\nProvider limits:")
             for p, limit in sorted(s["provider_limits"].items()):
                 print(f"  {p:20s}  ${limit:.2f}")
         if s["model_limits"]:
-            print(f"\nModel limits:")
+            print("\nModel limits:")
             for m, limit in sorted(s["model_limits"].items()):
                 print(f"  {m:35s}  ${limit:.2f}")
         if not s["provider_limits"] and not s["model_limits"]:
