@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.2.4 (2026-10-17)
+
+### Added
+
+- **`banto --version` / `banto -V` / `banto version`**: print `banto <version>` and exit 0. Handled before broker routing, so it also works in broker mode (it never touches Keychain, the broker socket, or config). Listed in `banto --help` and the README core-command tables (EN/JA). Tests added
+
+### Changed
+
+- CHANGELOG: corrected the "5.2.2 additional changes" entry that still said banto is not published on PyPI
+
 ## 5.2.3 (2026-10-17)
 
 ### Fixed
@@ -16,7 +26,7 @@
 
 ### Changed
 
-- README: install instructions now use the GitHub repository (`uv tool install "git+https://github.com/allnew-llc/banto.git"`) because banto is not published on PyPI
+- README: install instructions pointed at the GitHub repository (`uv tool install "git+https://github.com/allnew-llc/banto.git"`) because banto was not yet on PyPI when this entry was written. 5.2.2 was then published to PyPI (2026-10-17), and the README now installs from PyPI (`pip install banto`), keeping `git+https` for the latest development version (#19)
 - README: version/test/MCP-tool badges and tool table synced with the code (5.2.2, 14 MCP tools incl. sealed signing)
 - MCP annotations: `banto_sync_push` and `banto_sync_setup` now declare `openWorldHint: true` (they talk to external cloud platforms)
 - `banto.__version__` synced to 5.2.2 (matches `pyproject.toml`)
