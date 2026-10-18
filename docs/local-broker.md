@@ -158,3 +158,19 @@ Keychain項目やACLは変更・削除しません。
 例外・返答の秘密値除去、直接読み取り拒否、宛先制限、予算の予約・精算・保持、レート制限、監査ログの
 ハッシュチェーン、MCP転送、本人入力画面へのルーティングを検証します。
 本物のKeychain読み取り、外部API呼び出し、課金、認証操作は含みません。
+
+
+### JSON input for `broker call`
+
+Pipe exactly one UTF-8 JSON object and close stdin (EOF). For an operation
+without arguments, send `{}` explicitly. `broker health` does not read stdin.
+Interactive terminal input is rejected immediately. A pipe or redirected file
+has five seconds to deliver its complete object and EOF, with a size limit of
+`MAX_MESSAGE` bytes. Delayed or chunked input is accepted within that deadline;
+empty input, non-object JSON, malformed/trailing data, oversized input, and a
+producer that leaves the pipe open fail before a broker request is sent.
+Input errors use the generic broker error message and do not echo the payload.
+
+```sh
+printf '%s' '{}' | banto broker call health
+```
