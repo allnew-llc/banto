@@ -12,4 +12,6 @@ def redact(value, values: set[str]):
         return {redact(k, values): redact(v, values) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v, values) for v in value]
+    if isinstance(value, tuple):
+        return tuple(redact(v, values) for v in value)
     return value

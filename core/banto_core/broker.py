@@ -57,13 +57,19 @@ def dispatch(operation, arguments, *, handler=None, observed=None, redactor=reda
     except BrokerError as error:
         raise BrokerError(redactor(str(error), values)) from None
     finally:
-        meta = (_audit_meta if audit_context is None else audit_context).get()
-        if meta is not None:
-            cleaned = redactor(meta, values)
-            meta.clear()
-            meta.update(cleaned)
-        observed.reset(token)
-        values.clear()
+        try:
+            meta = (_audit_meta if audit_context is None else audit_context).get()
+            if meta is not None:
+                try:
+                    cleaned = redactor(meta, values)
+                finally:
+                    meta.clear()
+                meta.update(cleaned)
+        finally:
+            try:
+                observed.reset(token)
+            finally:
+                values.clear()
 
 
 
