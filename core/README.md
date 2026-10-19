@@ -39,8 +39,11 @@ provider API、launchctl を呼びません。既存 `tests/` は変更せずに
 モノレポのルートでは `make verify PYTHON=<pytest/MCP入りPython>` が
 core の単体試験と既存 suite を実行します。既存 suite の原本 41 ファイルは
 `compatibility-tests.json` の SHA と照合します。`core/tools/legacy_tests.py` は
-実 Keychain・外部接続・外部コマンドを遮断し、原本のダミー lease 試験に必要な
-固定コマンドと local fixture 接続だけを許可します。実機試験用の probe は
+実 Keychain・外部接続・未許可コマンドの呼出しを検出し、原本のダミー lease 試験に必要な
+固定コマンドと local fixture 接続だけを許可します。shell 内のパスは安全な ASCII 文字・
+絶対正規化パスに限定し、実行ファイル・argv・cwd・PATH と loader 環境変数も照合します。
+これは偶発的な副作用を検出する guard であり、意図的な同 UID コードへの OS 隔離では
+ありません。実機試験用の probe は
 collection 前に無効化します。ログと HOME/cache は `work/verification/`、
 空白を含むパスを扱えない原本 shell 試験の小さい一時データは `/tmp` に作り、
 試験後に消します。固定 port があるため、baseline と候補は直列で実行します。

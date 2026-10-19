@@ -5,18 +5,23 @@
 import argparse
 import hashlib
 import importlib.metadata
+import importlib.util
 import inspect
 import json
 import os
 from pathlib import Path
-import shlex
-import re
 import tempfile
 import subprocess
 import sys
 import time
 
 DEFAULT_REPO = Path(__file__).resolve().parents[2]
+_guard_spec = importlib.util.spec_from_file_location(
+    "legacy_fixture_guards", Path(__file__).with_name("fixture_guards.py"))
+_fixture_guards = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(_fixture_guards)
+fixture_command = _fixture_guards.fixture_command
+subprocess_allowed = _fixture_guards.subprocess_allowed
 HARDWARE_TESTS = [
     "tests/test_sealed_signer.py::test_enclave_roundtrip_and_non_extractable",
     "tests/test_sealed_signer.py::test_create_duplicate_key_rejected",
@@ -69,29 +74,6 @@ def guarded_native(target, violations, repo):
     return Guard()
 
 
-def fixture_command(values, environment, fixture_root):
-    """Only the reviewed lease fixtures; no arbitrary shell or real credentials."""
-    if values in [["echo", value] for value in ("FAKE", "FAKE_LEASE_VALUE", "A", "B")]:
-        return True
-    if (environment or {}).get("BANTO_LEASE_VALUE") not in {"", "FAKE", "FAKE_LEASE_VALUE"}:
-        return False
-    if values == ["false"]:
-        return True
-    if len(values) == 2 and values[0] == "touch":
-        path = Path(values[1]).resolve()
-        return path.is_relative_to(fixture_root) and path.name == "ran"
-    if len(values) == 3 and values[:2] == ["/bin/sh", "-c"]:
-        for pattern, filename in (
-            (r"sh -c 'true' && printf %s \"\$BANTO_LEASE_VALUE\" > (\S+)", "revoked.txt"),
-            (r"test -e (\S+) && echo \"\$BANTO_LEASE_VALUE\" >/dev/null", "allow"),
-        ):
-            match = re.fullmatch(pattern, values[2])
-            if match:
-                path = Path(match[1]).resolve()
-                return path.is_relative_to(fixture_root) and path.name == filename
-    return False
-
-
 def install_guards(repo, fixture_root):
     import socket
     sys.path.insert(0, str(repo))
@@ -139,14 +121,9 @@ def install_guards(repo, fixture_root):
         if event == "socket.getaddrinfo" and arguments[0] not in {"127.0.0.1", "::1", "localhost"}:
             safety_failure(violations, "external_dns_blocked")
         if event == "subprocess.Popen":
-            command = arguments[1]
-            values = shlex.split(command) if isinstance(command, str) else list(command)
-            if (len(values) == 4 and Path(values[0]).resolve() == Path(sys.executable).resolve()
-                    and values[1:3] == ["-m", "banto"] and values[3] in {"--version", "-V"}):
-                return
-            if values and Path(values[0]).name == "git" and values[1:2] == ["check-ignore"]:
-                return
-            if fixture_command(values, arguments[3], fixture_root):
+            if subprocess_allowed(*arguments, fixture_root=fixture_root, repo=repo,
+                                  python_executable=sys.executable,
+                                  inherited_environment=dict(os.environ), inherited_cwd=os.getcwd()):
                 return
             safety_failure(violations, "external_subprocess_blocked")
 
