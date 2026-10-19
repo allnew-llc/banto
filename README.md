@@ -727,3 +727,10 @@ Dual license:
 - **Commercial use** (paid): Organizations and companies require a commercial license from [AllNew LLC](https://github.com/allnew-llc/banto/issues).
 
 See [LICENSE](./LICENSE) for full terms.
+
+## Shared core development
+
+The local broker primitives live in [`core/`](core/README.md). For this source checkout,
+install both projects with `pip install ./core .` or use `uv sync` (local core source).
+Publish the approved core dependency before any dependent Banto release.
+Existing installed clients and LaunchAgents are not updated by source changes.

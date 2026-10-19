@@ -728,3 +728,10 @@ bantoは予算管理を支援するツールであり、API利用料金の超過
 - **商用利用**（有料）: 企業・組織での利用には、[AllNew LLC](https://github.com/allnew-llc/banto/issues) との商用ライセンス契約が必要です。
 
 詳細は [LICENSE](./LICENSE) をご参照ください。
+
+## 共通 core の開発
+
+broker の共通部品は [`core/`](core/README.md) にあります。この checkout では
+`pip install ./core .` または `uv sync` でローカルの core と本体を導入します。
+core に依存する Banto を配布する前に、承認された core を先に配布してください。
+ソースの変更だけでは、導入済みクライアントや LaunchAgent は更新されません。

@@ -12,3 +12,8 @@ build/
 
 # Local tool caches (never commit; may contain account identifiers)
 .wrangler/
+
+# Local verification state
+.safe-run/
+.venv/
+work/
