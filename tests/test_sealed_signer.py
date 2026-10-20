@@ -58,15 +58,18 @@ def test_enclave_roundtrip_and_non_extractable():
         assert ecdsa_p256.verify(bytes.fromhex(pub["public_key_x963_hex"]), msg, der) is True
 
         # The private key must be NON-EXTRACTABLE: asking the keychain for its data fails.
-        query = sealed_signer._cfdict([
-            (sealed_signer._const(sealed_signer._SEC, "kSecClass"), sealed_signer._const(sealed_signer._SEC, "kSecClassKey")),
-            (sealed_signer._const(sealed_signer._SEC, "kSecAttrApplicationTag"), sealed_signer._cfdata(sealed_signer._tag(key_id))),
-            (sealed_signer._const(sealed_signer._SEC, "kSecReturnData"), sealed_signer._const(sealed_signer._CF, "kCFBooleanTrue")),
-        ])
-        out = ctypes.c_void_p()
-        status = sealed_signer._SEC.SecItemCopyMatching(query, ctypes.byref(out))
-        sealed_signer._CF.CFRelease(query)
-        assert not out and status != 0  # no private-key bytes returned
+        pool = []
+        try:
+            query = sealed_signer._cfdict([
+                (sealed_signer._const(sealed_signer._SEC, "kSecClass"), sealed_signer._const(sealed_signer._SEC, "kSecClassKey")),
+                (sealed_signer._const(sealed_signer._SEC, "kSecAttrApplicationTag"), sealed_signer._cfdata(sealed_signer._tag(key_id), pool)),
+                (sealed_signer._const(sealed_signer._SEC, "kSecReturnData"), sealed_signer._const(sealed_signer._CF, "kCFBooleanTrue")),
+            ], pool)
+            out = ctypes.c_void_p()
+            status = sealed_signer._SEC.SecItemCopyMatching(query, ctypes.byref(out))
+            assert not out and status != 0  # no private-key bytes returned
+        finally:
+            sealed_signer._drain(pool)
     finally:
         sealed_signer.delete_signing_key(key_id)
 
