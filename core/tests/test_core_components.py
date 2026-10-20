@@ -88,9 +88,9 @@ def test_keychain_injected_guards_and_observers_are_independent(components):
     keychain = components["keychain"]
     first_guard, second_guard = Mock(), Mock()
     first_observed, second_observed = [], []
-    first = keychain.KeychainStore(account="fixture", service_prefix="factory-a",
+    first = keychain.KeychainStore(account="fixture", service_prefix="example-a",
         require_service=first_guard, observe_secret=first_observed.append)
-    second = keychain.KeychainStore(account="fixture", service_prefix="factory-b",
+    second = keychain.KeychainStore(account="fixture", service_prefix="example-b",
         require_service=second_guard, observe_secret=second_observed.append)
     # No framework exists in this fixture; only guard and observation are exercised.
     assert first.store("provider", DUMMY_SECRET) is False
@@ -124,10 +124,10 @@ def test_keychain_service_prefixes_do_not_change_banto_default(components):
     keychain = components["keychain"]
     before = keychain.KeychainStore.DEFAULT_PREFIX
     assert before == "banto"
-    first = keychain.KeychainStore(service_prefix="allnew-factory-a", account="fixture")
-    second = keychain.KeychainStore(service_prefix="allnew-factory-b", account="fixture")
-    assert first._service_name("Provider") == "allnew-factory-a-provider"
-    assert second._service_name("Provider") == "allnew-factory-b-provider"
+    first = keychain.KeychainStore(service_prefix="example-client-a", account="fixture")
+    second = keychain.KeychainStore(service_prefix="example-client-b", account="fixture")
+    assert first._service_name("Provider") == "example-client-a-provider"
+    assert second._service_name("Provider") == "example-client-b-provider"
     assert keychain.KeychainStore(account="fixture")._service_name("Provider") == "banto-provider"
     assert keychain.KeychainStore.DEFAULT_PREFIX == before
 

@@ -97,11 +97,13 @@ def resolve_executable(value, environment):
 
 
 def git_check_ignore(values, cwd, fixture_root, repo):
-    if len(values) < 3 or values[:2] != ["git", "check-ignore"]:
+    # Repository configuration must not start an fsmonitor helper during a check.
+    prefix = ["git", "-c", "core.fsmonitor=false", "check-ignore"]
+    if len(values) < 5 or values[:4] != prefix:
         return False
     paths = []
     operands = False
-    for value in values[2:]:
+    for value in values[4:]:
         if not operands and value in {"-q", "--quiet"}:
             continue
         if not operands and value == "--":

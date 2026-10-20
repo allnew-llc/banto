@@ -15,21 +15,21 @@ def test_custom_launch_agent_namespace_is_injected(tmp_path, monkeypatch):
     runner = Mock(return_value=Mock(returncode=0))
     client = Mock()
     factory = Mock(return_value=client)
-    runtime = tmp_path / "factory-runtime"
-    broker.install(directory=runtime, label="work.allnew.factory.broker",
-                   module="factory_broker", working_directory=tmp_path,
+    runtime = tmp_path / "example-runtime"
+    broker.install(directory=runtime, label="org.example.broker",
+                   module="example_broker", working_directory=tmp_path,
                    client_factory=factory, runner=runner)
-    plist = tmp_path / "Library/LaunchAgents/work.allnew.factory.broker.plist"
+    plist = tmp_path / "Library/LaunchAgents/org.example.broker.plist"
     spec = plistlib.loads(plist.read_bytes())
-    assert spec["Label"] == "work.allnew.factory.broker"
-    assert spec["ProgramArguments"][-3:] == ["-m", "factory_broker", "serve"]
+    assert spec["Label"] == "org.example.broker"
+    assert spec["ProgramArguments"][-3:] == ["-m", "example_broker", "serve"]
     assert spec["WorkingDirectory"] == str(tmp_path)
     assert plist.stat().st_mode & 0o777 == 0o600
     assert runner.call_count == 2
     client.call.assert_called_once_with("health")
     with pytest.raises(BrokerError, match="launch_agent_already_exists"):
-        broker.install(directory=runtime, label="work.allnew.factory.broker",
-                       module="factory_broker", working_directory=tmp_path,
+        broker.install(directory=runtime, label="org.example.broker",
+                       module="example_broker", working_directory=tmp_path,
                        client_factory=factory, runner=runner)
     assert runner.call_count == 2
 

@@ -110,12 +110,12 @@ def test_reviewed_commands_keep_working_as_pure_predicates(pure_check):
     assert check("/bin/sh", ["/bin/sh", "-c", shell], env=env)
     for flag in ("--version", "-V"):
         assert check(sys.executable, [sys.executable, "-m", "banto", flag], cwd=repo)
-    assert check("git", ["git", "check-ignore", "--quiet", "--", ".env"], cwd=root)
-    assert check("/usr/bin/git", ["/usr/bin/git", "check-ignore", ".env"], cwd=root)
+    assert check("git", ["git", "-c", "core.fsmonitor=false", "check-ignore", "--quiet", "--", ".env"], cwd=root)
+    assert check("/usr/bin/git", ["/usr/bin/git", "-c", "core.fsmonitor=false", "check-ignore", ".env"], cwd=root)
 
 
 @pytest.mark.parametrize("name,args", [("echo", ["FAKE"]), ("false", []),
-    ("git", ["check-ignore", ".env"]), ("sh", ["-c", "false"])])
+    ("git", ["-c", "core.fsmonitor=false", "check-ignore", ".env"]), ("sh", ["-c", "false"])])
 def test_actual_executable_cannot_be_disguised_by_argv(pure_check, name, args):
     check, _root, repo, _environment = pure_check
     fake = str(repo / name)
@@ -156,6 +156,17 @@ def test_cwd_python_and_git_arguments_are_bound(pure_check):
     assert not check("git", ["git", "check-ignore", "--stdin"], cwd=root)
     assert not check("git", ["git", "-c", "core.pager=fixture", "check-ignore", ".env"])
     assert not check("echo", "echo FAKE")
+
+
+def test_git_requires_fixed_fsmonitor_override(pure_check):
+    check, _root, _repo, _environment = pure_check
+    for arguments in (
+        ["git", "check-ignore", ".env"],
+        ["git", "-c", "core.fsmonitor=true", "check-ignore", ".env"],
+        ["git", "-c", "core.fsmonitor=false", "-c", "core.fsmonitor=fixture", "check-ignore", ".env"],
+        ["git", "-c", "core.fsmonitor=false", "check-ignore", "../outside"],
+    ):
+        assert not check("git", arguments)
 
 
 def test_audit_callback_passes_actual_executable_to_guard(pure_check, monkeypatch):

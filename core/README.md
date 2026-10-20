@@ -12,6 +12,15 @@ macOS Security framework だけを使います。Banto アプリケーション�
 `uv sync` が `tool.uv.sources` に従ってこのディレクトリを使用します。
 pip のローカル開発では `pip install ./core .` を使用してください。
 
+**マージ保留**: AllNew が PyPI の正規化名 `banto-core` を所有し、レビューした
+0.1.0 の wheel/sdist を公開して所有者と artifact の対応を確認するまで、
+core に依存する Banto の PR をマージしてはいけません。名前の404応答や版番号の
+一致だけで所有を確認したことにはしません。TestPyPI への登録も代用しません。
+所有者・公開 URL・レビュー対象 SHA と配布物の hash を本人が確認します。
+現時点は未確認で、PR は Draft のままです。自動の公開や名前の確保はしません。
+`banto_core` の版は最初の読込み時にも照合しますが、これは真正性の証明ではありません。
+同じ 0.1.0 を名乗る第三者パッケージを信頼してよい理由にはなりません。
+
 未公開の core を必要とする banto リリースを先に公開してはいけません。
 core の署名付き tag、配布先、公開は所有者の別承認で行います。この PR は
 インストール済みの Banto や LaunchAgent を更新しません。
@@ -42,6 +51,7 @@ core の単体試験と既存 suite を実行します。既存 suite の原本 
 実 Keychain・外部接続・未許可コマンドの呼出しを検出し、原本のダミー lease 試験に必要な
 固定コマンドと local fixture 接続だけを許可します。shell 内のパスは安全な ASCII 文字・
 絶対正規化パスに限定し、実行ファイル・argv・cwd・PATH と loader 環境変数も照合します。
+git の許可形は `git -c core.fsmonitor=false check-ignore ...` に固定します。
 これは偶発的な副作用を検出する guard であり、意図的な同 UID コードへの OS 隔離では
 ありません。実機試験用の probe は
 collection 前に無効化します。ログと HOME/cache は `work/verification/`、
@@ -58,3 +68,15 @@ collection 前に無効化します。ログと HOME/cache は `work/verificatio
 観測済み秘密値が BrokerError の文言や監査 metadata の文字列へ混入する場合も、
 観測集合を破棄する前に除去します。既定名や正常応答を変えず、例外応答と
 監査ログの値除去を補強する修正です。ダミー値を使った socket 試験で確認します。
+tuple 内の観測値も除去し、tuple の型は維持します。固定 HTTP transport は未知の
+provider を外部通信前に拒否します。この2点は抽出元の内部 helper に対する安全側の
+挙動変更です。Banto 公開 API の provider allowlist は以前から存在します。
+
+## Phase 3 の受入れ
+
+本人が実機2件の作成・署名・検証を確認し、元から存在する sealed 鍵の発見と
+socket・Keychain service prefix・LaunchAgent label・sealed tag の互換を実機確認します。
+元の非抽出試験にある pool 引数欠陥の修正は別 PR で扱い、この PR の原本41試験は
+変更しません。mock/静的照合や安全 runner の skip を実機確認の代用にしません。
+PyPI の上記確認、本人のマージと tag まで Phase 3 は未完了です。
+grader の OS 隔離は Phase 5 の別条件として管理します。
