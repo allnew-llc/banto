@@ -61,7 +61,7 @@ mcp = [
 
 [package.metadata]
 requires-dist = [
-    { name = "banto-core", directory = "core" },
+    { name = "banto-core", editable = "core" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.45,<2" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1" },
@@ -71,7 +71,7 @@ provides-extras = ["mcp", "browser"]
 [[package]]
 name = "banto-core"
 version = "0.1.0"
-source = { directory = "core" }
+source = { editable = "core" }
 
 [[package]]
 name = "certifi"

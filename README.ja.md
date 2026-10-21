@@ -732,6 +732,19 @@ bantoは予算管理を支援するツールであり、API利用料金の超過
 ## 共通 core の開発
 
 broker の共通部品は [`core/`](core/README.md) にあります。この checkout では
-`pip install ./core .` または `uv sync` でローカルの core と本体を導入します。
+本体と core の両方を editable で導入します。`[tool.uv.sources]` の
+`banto-core = { path = "core", editable = true }` により、
+`uv pip install -e .` は site-packages へのコピーではなく、このディレクトリを読みます。
+
+```bash
+uv pip install -e ".[mcp]" 'pytest>=9.0.2,<10'
+make verify
+```
+
+`pip install -e ./core -e ".[mcp]"` でも同じです。`pip install ./core` のように
+core を非 editable で入れると `make verify` は失敗します。legacy runner が
+ソフトウェア署名を許すのは、この checkout の
+`core/banto_core/_sealed_testing.py` と `banto/sealed_signer.py` だけです。
+pytest は 9.0.2 以上 10 未満、`mcp` は import できる必要があります。
 core に依存する Banto を配布する前に、承認された core を先に配布してください。
 ソースの変更だけでは、導入済みクライアントや LaunchAgent は更新されません。

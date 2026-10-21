@@ -9,8 +9,17 @@ macOS Security framework だけを使います。Banto アプリケーション�
 このディレクトリは独立した Python project です。`banto_core` を import します。
 `python -m build core` で wheel と source distribution を作れます。
 本家 banto は `banto-core==0.1.0` に依存します。モノレポ開発では
-`uv sync` が `tool.uv.sources` に従ってこのディレクトリを使用します。
-pip のローカル開発では `pip install ./core .` を使用してください。
+`tool.uv.sources` がこのディレクトリを **editable** にします
+（`banto-core = { path = "core", editable = true }`）。
+次で本体・core・検証用の依存が入ります。
+
+```bash
+uv pip install -e ".[mcp]" 'pytest>=9.0.2,<10'
+```
+
+`pip install -e ./core -e ".[mcp]"` でも同じです。core を site-packages へ
+コピーする `pip install ./core` や、editable 指定のない path source は、
+検証 runner の呼び出し元ガードに拒否されます。
 
 **マージ保留**: AllNew が PyPI の正規化名 `banto-core` を所有し、レビューした
 0.1.0 の wheel/sdist を公開して所有者と artifact の対応を確認するまで、
@@ -52,7 +61,10 @@ provider API、launchctl を呼びません。既存 `tests/` は
 を加えたものです。それ以外の legacy 試験ファイルは main と同一です。
 偽フレームワーク試験の成功は、実 Secure Enclave の非抽出性の合格ではありません。
 モノレポのルートでは `make verify PYTHON=<pytest/MCP入りPython>` が
-core の単体試験と既存 suite を実行します。`core/tools/legacy_tests.py` は
+core の単体試験と既存 suite を実行します。pytest は `>=9.0.2,<10`
+（9.0.2 と 9.1.x を含む。8 と 10 は拒否）で、同じインタプリタから `mcp` を
+import できる必要があります。署名の呼び出し元は checkout 内の2ファイルだけです。
+site-packages にコピーされた core は許可リストに入っていません。`core/tools/legacy_tests.py` は
 実 Keychain・外部接続・未許可コマンドの呼出しを検出し、原本のダミー lease 試験に必要な
 固定コマンドと local fixture 接続だけを許可します。shell 内のパスは安全な ASCII 文字・
 絶対正規化パスに限定し、実行ファイル・argv・cwd・PATH と loader 環境変数も照合します。

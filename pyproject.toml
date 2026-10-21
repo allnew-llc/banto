@@ -45,4 +45,6 @@ include = ["banto", "banto.*"]
 banto = ["config.json", "pricing.json", "rotation_capabilities.json"]
 
 [tool.uv.sources]
-banto-core = { path = "core" }
+# Editable so `uv pip install -e .` loads this checkout. A non-editable copy
+# in site-packages fails the legacy runner's caller-path signing guard.
+banto-core = { path = "core", editable = true }

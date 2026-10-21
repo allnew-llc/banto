@@ -48,6 +48,28 @@ def test_persistent_native_calls_fail_before_fake_native_is_called(tmp_path):
     native.SecKeyCreateRandomKey.assert_not_called()
 
 
+@pytest.mark.parametrize("text", ["9.0.2", "9.1.1", "9.1", "9.10.0"])
+def test_pytest_nine_line_is_accepted(text):
+    assert runner.pytest_supported(text)
+
+
+@pytest.mark.parametrize("text", [None, "", "9", "9.0.1", "8.9.9", "10.0.0", "10", "9.0.2rc1", "9.1.1+local"])
+def test_pytest_outside_the_nine_line_is_blocked(text):
+    assert not runner.pytest_supported(text)
+
+
+def test_signing_guard_accepts_only_the_checkout_helpers(tmp_path):
+    repo = tmp_path / "checkout"
+    checkout_helper = repo / "core/banto_core/_sealed_testing.py"
+    legacy_helper = repo / "banto/sealed_signer.py"
+    installed = tmp_path / "site-packages/banto_core/_sealed_testing.py"
+    assert runner.signing_caller_allowed(checkout_helper, "ephemeral_software_sign", repo)
+    assert runner.signing_caller_allowed(legacy_helper, "_ephemeral_software_sign", repo)
+    assert not runner.signing_caller_allowed(installed, "ephemeral_software_sign", repo)
+    assert not runner.signing_caller_allowed(checkout_helper, "sign", repo)
+    assert not runner.signing_caller_allowed(checkout_helper, "_ephemeral_software_sign", repo)
+
+
 @pytest.fixture
 def pure_check(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):

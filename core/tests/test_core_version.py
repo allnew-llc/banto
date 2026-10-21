@@ -75,7 +75,9 @@ def sandbox(tmp_path):
 
 
 def test_expected_version_matches_both_project_metadata():
-    assert f'"banto-core=={EXPECTED}"' in ROOT.joinpath("pyproject.toml").read_text()
+    project = ROOT.joinpath("pyproject.toml").read_text()
+    assert f'"banto-core=={EXPECTED}"' in project
+    assert 'banto-core = { path = "core", editable = true }' in project
     assert f'version = "{EXPECTED}"' in ROOT.joinpath("core/pyproject.toml").read_text()
     assert f'EXPECTED_CORE_VERSION = "{EXPECTED}"' in ADAPTER.read_text()
 

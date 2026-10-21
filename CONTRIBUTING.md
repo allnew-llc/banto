@@ -40,9 +40,14 @@ opening an issue first to discuss the approach.
 ```bash
 git clone https://github.com/allnew-llc/banto.git
 cd banto
-pip install -e ".[dev]"   # or: uv pip install -e ".[dev]"
-pytest                     # run tests (230+ should pass)
+uv pip install -e ".[mcp]" 'pytest>=9.0.2,<10'
+pytest                     # application tests
+make verify                # core tests plus the guarded legacy suite
 ```
+
+`[tool.uv.sources]` installs `banto-core` editable from `core/`. The verify
+runner accepts pytest 9.0.2 up to, but not including, 10, and only the checkout
+copies of the software-signing helpers.
 
 ## Code Style
 

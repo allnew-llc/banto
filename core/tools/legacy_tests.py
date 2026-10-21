@@ -53,9 +53,46 @@ def safety_failure(violations, kind):
     raise AssertionError("SAFETY_GUARD: " + kind)
 
 
+# The runner was exercised on 9.0.2. Later 9.x releases keep the plugin hooks it uses.
+PYTEST_REQUIREMENT = ">=9.0.2,<10"
+
+
+def _version_tuple(text):
+    if not isinstance(text, str) or not text or any(character not in "0123456789." for character in text):
+        return None
+    parts = text.split(".")
+    if not 2 <= len(parts) <= 3 or any(part == "" for part in parts):
+        return None
+    try:
+        numbers = tuple(int(part) for part in parts)
+    except ValueError:
+        return None
+    if len(numbers) == 2:
+        numbers = numbers + (0,)
+    return numbers
+
+
+def pytest_supported(text):
+    """Accept the tested 9.0.2 line through the rest of pytest 9. Reject 8 and 10."""
+    version = _version_tuple(text)
+    return version is not None and (9, 0, 2) <= version < (10, 0, 0)
+
+
+def signing_caller_allowed(filename, function_name, repo):
+    """Allow only the checkout helpers. An installed copy is a different file."""
+    repo = Path(repo).resolve()
+    allowed = {
+        (str((repo / "banto/sealed_signer.py").resolve()), "_ephemeral_software_sign"),
+        (str((repo / "core/banto_core/_sealed_testing.py").resolve()), "ephemeral_software_sign"),
+    }
+    try:
+        resolved = str(Path(filename).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return (resolved, function_name) in allowed
+
+
 def guarded_native(target, violations, repo):
-    software_helpers = {(str((repo / "banto/sealed_signer.py").resolve()), "_ephemeral_software_sign"),
-                        (str((repo / "core/banto_core/_sealed_testing.py").resolve()), "ephemeral_software_sign")}
     class Guard:
         def __getattr__(self, name):
             if name.startswith(("SecItem", "SecKeychain")):
@@ -66,7 +103,7 @@ def guarded_native(target, violations, repo):
             if name in {"SecKeyCreateRandomKey", "SecKeyCreateSignature"}:
                 def software_only(*args, **kwargs):
                     caller = inspect.currentframe().f_back
-                    if (str(Path(caller.f_code.co_filename).resolve()), caller.f_code.co_name) not in software_helpers:
+                    if not signing_caller_allowed(caller.f_code.co_filename, caller.f_code.co_name, repo):
                         safety_failure(violations, "non_fixture_signing_blocked")
                     return function(*args, **kwargs)
                 return software_only
@@ -174,7 +211,8 @@ def child(args):
                      "small_pytest_fixtures": "short_tmp_path_for_unchanged_shell_fixtures_cleaned_after_run",
                      "dependency_versions": {name: version(name) for name in
                          ("pytest", "mcp", "setuptools", "build", "ruff")}})
-    if metadata["pytest"] != "9.0.2" or metadata["mcp"] is None:
+    metadata["pytest_requirement"] = PYTEST_REQUIREMENT
+    if not pytest_supported(metadata["pytest"]) or metadata["mcp"] is None:
         metadata.update({"state": "blocked_missing_test_dependencies", "exit_code": None, "seconds": None})
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
         print(json.dumps({"state": metadata["state"], "pytest": metadata["pytest"], "mcp": metadata["mcp"]}))
