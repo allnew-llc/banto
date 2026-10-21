@@ -8,24 +8,27 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextvars
-import fcntl
+import fcntl as fcntl  # legacy module attribute
 import inspect
 import json
 import os
 from pathlib import Path
-import plistlib
-import socket
-import socketserver
-import struct
+import plistlib as plistlib  # legacy module attribute
+import socket as socket  # legacy module attribute
+import socketserver as socketserver  # legacy module attribute
+import struct as struct  # legacy module attribute
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from collections import deque
+from ._core import load_module
 
-from .broker_client import (BrokerClient, BrokerError, MAX_MESSAGE, check_private,
-                            encode_message, read_message, runtime_dir, socket_path)
+_transport = load_module("broker")
+
+from .broker_client import (BrokerClient, BrokerError, MAX_MESSAGE as MAX_MESSAGE, check_private,
+                            encode_message as encode_message, read_message as read_message, runtime_dir, socket_path)
 
 IN_SERVICE = False
 _observed = contextvars.ContextVar("banto_broker_secrets", default=None)
@@ -44,29 +47,19 @@ MCP_OPERATIONS = (
 
 
 def require_service() -> None:
-    """Fail closed for legacy library calls once this machine enables the broker.
-
-    This prevents accidental direct reads, not hostile code under the same UID.
-    """
-    if not IN_SERVICE and (runtime_dir() / "required").exists():
-        raise BrokerError("direct_keychain_disabled; use BrokerClient operations or banto register")
+    _transport.require_service(in_service=IN_SERVICE, directory=runtime_dir())
 
 
 def observe_secret(value: str) -> None:
-    values = _observed.get()
-    if values is not None:
-        values.add(value)
+    _transport.observe_secret(value, observed=_observed)
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+NoRedirect = load_module("http").NoRedirect
+request_fixed = load_module("http").request_fixed
 
 
 def _audit(**meta) -> None:
-    current = _audit_meta.get()
-    if current is not None:
-        current.update(meta)
+    _transport.audit_metadata(meta, context=_audit_meta)
 
 
 def audit_path() -> Path:
@@ -92,12 +85,7 @@ def _check_rate_limit(now: float | None = None) -> None:
     if rpm == 0:
         return
     now = time.monotonic() if now is None else now
-    while _api_calls and now - _api_calls[0] >= 60:
-        _api_calls.popleft()
-    if len(_api_calls) >= rpm:
-        retry = max(1, int(60 - (now - _api_calls[0])) + 1)
-        raise BrokerError(f"rate_limited; retry after {retry}s (broker.api_request_rpm={rpm})")
-    _api_calls.append(now)
+    _transport.check_rate_limit(_api_calls, rpm, now)
 
 
 def _usage_tokens(provider: str, result: dict) -> tuple[int, int] | None:
@@ -171,23 +159,8 @@ def api_request(provider: str, payload: dict) -> dict:
             guard.void_hold(hold_id)
             _audit(budget="voided")
         raise
-    headers = {"Content-Type": "application/json"}
-    if provider == "openai":
-        url = "https://api.openai.com/v1/responses"
-        headers["Authorization"] = "Bearer " + key
-        payload = {**payload, "store": False}
-    else:
-        url = "https://api.anthropic.com/v1/messages"
-        headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
-    # Ignore ambient proxy settings and never forward auth through redirects.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    request = urllib.request.Request(url, json.dumps(payload).encode(), headers, method="POST")
     try:
-        with opener.open(request, timeout=120) as response:
-            raw = response.read(MAX_MESSAGE + 1)
-        if len(raw) > MAX_MESSAGE:
-            raise BrokerError("upstream_response_too_large")
-        result = json.loads(raw)
+        result = request_fixed(provider, payload, key)
     except urllib.error.HTTPError as error:
         error.close()
         _audit(status=error.code)
@@ -206,8 +179,6 @@ def api_request(provider: str, payload: dict) -> dict:
             _audit(budget="kept_unknown_outcome")
         raise BrokerError("upstream_failed_or_outcome_unknown") from None
     _audit(status=200)
-    # Filter after decoding, so JSON escapes cannot defeat redaction.
-    result = redact(result, {key})
     if hold_id:
         tokens = _usage_tokens(provider, result)
         if tokens is None:
@@ -227,17 +198,7 @@ def api_request(provider: str, payload: dict) -> dict:
     return result
 
 
-def redact(value, values: set[str]):
-    if isinstance(value, str):
-        for secret in sorted(values, key=len, reverse=True):
-            if secret:
-                value = value.replace(secret, "[REDACTED]")
-        return value
-    if isinstance(value, dict):
-        return {redact(k, values): redact(v, values) for k, v in value.items()}
-    if isinstance(value, list):
-        return [redact(v, values) for v in value]
-    return value
+redact = _transport.redact
 
 
 def _dispatch(operation: str, arguments: dict) -> dict:
@@ -259,62 +220,17 @@ def _dispatch(operation: str, arguments: dict) -> dict:
 
 
 def dispatch(operation: str, arguments: dict) -> dict:
-    values: set[str] = set()
-    token = _observed.set(values)
-    try:
-        return redact(_dispatch(operation, arguments), values)
-    finally:
-        _observed.reset(token)
-        values.clear()
+    return _transport.dispatch(operation, arguments, handler=_dispatch,
+                               observed=_observed, redactor=redact, audit_context=_audit_meta)
 
 
 def peer_uid(connection) -> int:
-    if sys.platform == "darwin":
-        # LOCAL_PEERCRED (SOL_LOCAL=0), struct xucred: version, uid, groups.
-        raw = connection.getsockopt(0, 1, 80)
-        version, uid = struct.unpack_from("=II", raw)
-        if version != 0:
-            raise BrokerError("unsupported_peer_credentials")
-        return uid
-    raw = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
-    return struct.unpack("3i", raw)[1]
+    return _transport.peer_uid(connection)
 
 
-class Handler(socketserver.StreamRequestHandler):
-    def handle(self):
-        self.connection.settimeout(180)
-        operation = "unknown"
-        meta: dict = {}
-        token = _audit_meta.set(meta)
-        try:
-            if peer_uid(self.connection) != os.getuid():
-                raise BrokerError("peer_denied")
-            request = read_message(self.rfile)
-            if set(request) != {"operation", "arguments"} or not isinstance(request["arguments"], dict):
-                raise BrokerError("invalid_request")
-            if isinstance(request["operation"], str):
-                operation = request["operation"]
-            # Argument names only; values may be secrets or prompts.
-            meta["argument_keys"] = [k for k in request["arguments"] if isinstance(k, str)][:20]
-            # Serialized execution keeps existing sync/rotation state safe.
-            result = self.server.dispatch(request["operation"], request["arguments"])
-            response = {"ok": True, "result": result}
-        except BrokerError as error:
-            response = {"ok": False, "error": str(error)}
-        except Exception:
-            # Exceptions can contain credentials or upstream response bodies.
-            response = {"ok": False, "error": "operation_failed"}
-        finally:
-            _audit_meta.reset(token)
-        if operation != "health":
-            try:
-                self.server.audit(operation, response["ok"], response.get("error"), meta)
-            except Exception:
-                pass  # Auditing must never leak data or break the reply.
-        try:
-            self.wfile.write(encode_message(response))
-        except (OSError, BrokerError):
-            pass
+class Handler(_transport.Handler):
+    # Resolve legacy globals per request, including monkeypatched private contexts.
+    namespace = staticmethod(lambda: globals())
 
 
 def _write_audit(operation: str, ok: bool, error: str | None, meta: dict) -> None:
@@ -322,78 +238,27 @@ def _write_audit(operation: str, ok: bool, error: str | None, meta: dict) -> Non
     AuditLog(audit_path()).append(operation, ok, error, meta)
 
 
-class Server(socketserver.UnixStreamServer):
+class Server(_transport.Server):
     dispatch = staticmethod(dispatch)
-    audit = staticmethod(_write_audit)
-
-    def handle_error(self, request, client_address):
-        pass  # Never emit request data or exception tracebacks.
+    audit = staticmethod(_write_audit)  # Never emit request data or exception tracebacks.
 
 
 def serve(path: Path | None = None) -> None:
-    global IN_SERVICE
-    path = path or socket_path()
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    check_private(path.parent, directory=True)
-    lock_fd = os.open(path.parent / "service.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if path.exists() or path.is_symlink():
-            check_private(path)
-            path.unlink()
-        IN_SERVICE = True
-        old_umask = os.umask(0o077)
-        try:
-            server = Server(str(path), Handler)
-        finally:
-            os.umask(old_umask)
-        with server:
-            try:
-                server.serve_forever()
-            finally:
-                path.unlink(missing_ok=True)
-    finally:
-        IN_SERVICE = False
-        os.close(lock_fd)
+    def service_state(value):
+        global IN_SERVICE
+        IN_SERVICE = value
+    return _transport.serve(path or socket_path(), server_factory=Server,
+                            handler_factory=Handler, set_service_state=service_state, path_checker=check_private)
 
 
 def install() -> None:
-    """Install a user LaunchAgent with one absolute Python path; no Keychain read."""
     if sys.platform != "darwin":
         raise BrokerError("macos_required")
-    # Validate dependencies without importing/reading user credentials.
+    # Preserve the legacy dependency check without any credential access.
     import mcp  # noqa: F401
-    directory = runtime_dir()
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    check_private(directory, directory=True)
-    plist_path = Path.home() / "Library" / "LaunchAgents" / (LABEL + ".plist")
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    if plist_path.exists():
-        raise BrokerError("launch_agent_already_exists; inspect before replacing")
-    spec = {"Label": LABEL, "ProgramArguments": [sys.executable, "-m", "banto.broker", "serve"],
-            "WorkingDirectory": str(Path(__file__).resolve().parent.parent),
-            "RunAtLoad": True, "KeepAlive": True, "Umask": 0o077,
-            "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null"}
-    with plist_path.open("xb") as target:
-        plistlib.dump(spec, target)
-    os.chmod(plist_path, 0o600)
-    result = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)], capture_output=True)
-    if result.returncode:
-        plist_path.unlink()
-        raise BrokerError("launch_agent_bootstrap_failed")
-    result = subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
-    if result.returncode:
-        raise BrokerError("launch_agent_installed_but_start_failed")
-    deadline = time.monotonic() + 10
-    while True:
-        try:
-            BrokerClient(timeout=0.5).call("health")
-            break
-        except BrokerError:
-            if time.monotonic() >= deadline:
-                raise BrokerError("launch_agent_installed_but_not_ready") from None
-            time.sleep(0.1)
-    print(json.dumps({"installed": True, "plist": str(plist_path), "python": sys.executable}))
+    return _transport.install(directory=runtime_dir(), label=LABEL, module="banto.broker",
+                              working_directory=Path(__file__).resolve().parent.parent,
+                              client_factory=BrokerClient, runner=subprocess.run, path_checker=check_private)
 
 
 def main() -> None:

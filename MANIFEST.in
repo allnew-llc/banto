@@ -1,0 +1,6 @@
+include Makefile
+recursive-include tests *.py
+include core/pyproject.toml core/README.md core/LICENSE core/MANIFEST.in core/compatibility-tests.json
+recursive-include core/banto_core *.py
+recursive-include core/tests *.py
+recursive-include core/tools *.py

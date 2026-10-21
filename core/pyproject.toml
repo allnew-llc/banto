@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banto-core"
+version = "0.1.0"
+description = "Shared local broker, Keychain and sealed signing primitives"
+readme = "README.md"
+license = "LicenseRef-Dual"
+requires-python = ">=3.10"
+authors = [{ name = "AllNew LLC" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/allnew-llc/banto"
+
+[tool.setuptools.packages.find]
+include = ["banto_core", "banto_core.*"]

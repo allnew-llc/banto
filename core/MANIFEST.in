@@ -1,0 +1,2 @@
+include compatibility-tests.json
+recursive-include tools *.py

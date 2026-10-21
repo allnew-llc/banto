@@ -10,7 +10,7 @@ readme = "README.md"
 license = "LicenseRef-Dual"
 requires-python = ">=3.10"
 authors = [{ name = "AllNew LLC" }]
-dependencies = ["tomli>=1.1; python_version < '3.11'"]
+dependencies = ["banto-core==0.1.0", "tomli>=1.1; python_version < '3.11'"]
 keywords = ["llm", "api", "budget", "keychain", "macos", "security", "secrets", "sync", "vault", "lease", "dynamic-secrets"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -39,7 +39,12 @@ banto = "banto.__main__:main"
 banto-mcp = "banto.mcp_server:main"
 
 [tool.setuptools.packages.find]
-include = ["banto*"]
+include = ["banto", "banto.*"]
 
 [tool.setuptools.package-data]
 banto = ["config.json", "pricing.json", "rotation_capabilities.json"]
+
+[tool.uv.sources]
+# Editable so `uv pip install -e .` loads this checkout. A non-editable copy
+# in site-packages fails the legacy runner's caller-path signing guard.
+banto-core = { path = "core", editable = true }

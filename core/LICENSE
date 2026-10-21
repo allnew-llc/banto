@@ -1,0 +1,93 @@
+banto Dual License
+
+Copyright (c) 2025-2026 AllNew LLC. All rights reserved.
+
+This software is available under two licenses. Choose the one that
+applies to your situation.
+
+
+1. PERSONAL LICENSE (free of charge)
+=====================================
+
+Permission is hereby granted, free of charge, to any individual person
+(natural person) obtaining a copy of this software and associated
+documentation files (the "Software"), to use, copy, modify, merge,
+and redistribute the Software for personal, educational, research,
+and evaluation purposes, subject to the following conditions:
+
+  (a) The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.
+
+  (b) This license applies to individuals acting in their own capacity.
+      Use on behalf of, or within the operations of, a company,
+      corporation, or other organization requires a Commercial License.
+
+  (c) Individuals may use the Software in freelance or contract work.
+      If the end client is an organization (company, corporation, or
+      other legal entity), the organization must hold a Commercial
+      License before deploying the Software. The freelancer is
+      responsible for informing the client of this requirement.
+
+  (d) Sole proprietors (個人事業主) using the Software for
+      revenue-generating business activities require a Commercial
+      License.
+
+
+2. COMMERCIAL LICENSE (paid)
+============================
+
+Use of the Software by or on behalf of any company, corporation,
+government entity, non-profit organization, or other legal entity
+requires a separate Commercial License agreement with AllNew LLC.
+
+Commercial use includes, but is not limited to:
+
+  - Integration into products or services
+  - Use within internal business operations or tools
+  - Deployment in production environments operated by an organization
+  - Distribution as part of a commercial offering
+
+For licensing inquiries:
+  https://github.com/allnew-llc/banto/issues
+
+
+DISCLAIMER
+==========
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+LIMITATION OF LIABILITY FOR BUDGET ENFORCEMENT
+===============================================
+
+banto is a budget management aid, not a guarantee against excessive
+API charges. The authors and copyright holders shall not be liable for
+any direct, indirect, incidental, special, exemplary, or consequential
+damages (including, but not limited to, unexpected API charges,
+financial losses, or service interruptions) arising from:
+
+  (a) Inaccuracies in the bundled or user-configured pricing table,
+      including outdated or incorrect per-model rates;
+
+  (b) Budget overruns caused by software defects, configuration
+      errors, race conditions, or unforeseen usage patterns;
+
+  (c) Agents or processes that bypass banto's API and access API keys
+      or provider services through other means (e.g., direct Keychain
+      queries, environment variables, or alternate credential stores);
+
+  (d) Changes in provider pricing that are not reflected in the
+      user's configuration;
+
+  (e) Any other circumstances in which actual API charges exceed the
+      budget limits configured in banto.
+
+Users are solely responsible for monitoring their actual API spend
+through each provider's billing dashboard and for configuring banto's
+pricing table to reflect current provider rates.

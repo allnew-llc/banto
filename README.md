@@ -727,3 +727,22 @@ Dual license:
 - **Commercial use** (paid): Organizations and companies require a commercial license from [AllNew LLC](https://github.com/allnew-llc/banto/issues).
 
 See [LICENSE](./LICENSE) for full terms.
+
+## Shared core development
+
+The local broker primitives live in [`core/`](core/README.md). Install this checkout
+so both projects are editable. `[tool.uv.sources]` sets `banto-core` to
+`{ path = "core", editable = true }`, which makes `uv pip install -e .` load the
+checkout instead of a copy in site-packages:
+
+```bash
+uv pip install -e ".[mcp]" 'pytest>=9.0.2,<10'
+make verify
+```
+
+`pip install -e ./core -e ".[mcp]"` is the same shape. A non-editable
+`pip install ./core` copy fails `make verify`: the legacy runner allows software
+signing only from `core/banto_core/_sealed_testing.py` and `banto/sealed_signer.py`
+in this checkout. Pytest must be at least 9.0.2 and below 10, and `mcp` must be
+importable. Publish the approved core dependency before any dependent Banto release.
+Existing installed clients and LaunchAgents are not updated by source changes.
