@@ -405,6 +405,8 @@ banto broker audit --verify      # verify the hash-chained audit log
 
 After upgrading banto, restart the service: `launchctl kickstart -k gui/$(id -u)/work.allnew.banto.broker`. `banto broker disable` returns to direct mode. Details (Japanese): [docs/local-broker.md](./docs/local-broker.md).
 
+`banto broker call <operation>` reads one UTF-8 JSON object from stdin and requires EOF within five seconds (maximum 8 MiB). It rejects a terminal, empty stdin, non-object JSON, trailing data, excessive nesting, and a pipe left open, before any broker request. Send `{}` when the operation takes no arguments. Failures use a generic message and do not echo the payload. `banto broker health` does not read stdin.
+
 **`api_request`** (`BrokerClient().call("api_request", provider="openai"|"anthropic", payload={...})` or the `banto_api_request` MCP tool) makes non-streaming OpenAI Responses / Anthropic Messages calls. Destination, auth headers and redirects are fixed; remote tools and streaming are rejected. When budget gating is on:
 
 - the payload must set `max_output_tokens` (OpenAI) / `max_tokens` (Anthropic) and the model must have a `per_token` entry in `pricing.json` (`unpriced_model` otherwise);

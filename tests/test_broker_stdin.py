@@ -145,6 +145,18 @@ def test_production_deadline_bounds_silent_pipe():
         if proc.poll() is None: proc.kill(); proc.wait()
 
 
+def test_deeply_nested_json_fails_closed_without_echo():
+    code = HARNESS.replace("broker.MAX_MESSAGE = 256\n", "broker.MAX_MESSAGE = 30000\n")
+    payload = b"[" * 10000 + b"]" * 10000
+    proc = subprocess.Popen([sys.executable, "-c", code, "call", "fixture"], cwd=ROOT,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate(payload, timeout=5)
+    assert proc.returncode == 1
+    assert out == b""
+    assert err == b"Broker command failed; no direct Keychain fallback. Check service and operation arguments.\n"
+    assert payload not in err
+
+
 @pytest.mark.parametrize('size, expected', [(256, 0), (257, 1)])
 def test_valid_object_size_boundary(size, expected):
     payload = b'{"x":"' + b'a' * (size - 8) + b'"}'

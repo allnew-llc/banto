@@ -418,7 +418,12 @@ def _read_call_arguments() -> dict:
         payload.extend(chunk)
         if len(payload) > MAX_MESSAGE:
             raise ValueError("call stdin is too large")
-    arguments = json.loads(payload.decode("utf-8"))
+    try:
+        # RecursionError's traceback is huge and must not replace the generic
+        # client error. The message itself does not include the document.
+        arguments = json.loads(payload.decode("utf-8"))
+    except RecursionError:
+        raise ValueError("call stdin is too deep") from None
     if not isinstance(arguments, dict):
         raise ValueError("call stdin must be a JSON object")
     return arguments

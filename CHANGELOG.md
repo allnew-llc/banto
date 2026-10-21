@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- `banto broker call` now requires one UTF-8 JSON object and EOF within five seconds, bounded by `MAX_MESSAGE` (8 MiB). A terminal, empty input, non-object JSON, trailing data, excessive nesting, an oversized body, or a pipe left open fails before any broker request. The payload is not echoed. Callers with no arguments must send `{}`. `banto broker health` does not read stdin
+
 ## 5.3.1 (2026-10-17)
 
 ### Removed

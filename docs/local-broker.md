@@ -160,17 +160,21 @@ Keychain項目やACLは変更・削除しません。
 本物のKeychain読み取り、外部API呼び出し、課金、認証操作は含みません。
 
 
-### JSON input for `broker call`
+## `broker call` の JSON 入力
 
-Pipe exactly one UTF-8 JSON object and close stdin (EOF). For an operation
-without arguments, send `{}` explicitly. `broker health` does not read stdin.
-Interactive terminal input is rejected immediately. A pipe or redirected file
-has five seconds to deliver its complete object and EOF, with a size limit of
-`MAX_MESSAGE` bytes. Delayed or chunked input is accepted within that deadline;
-empty input, non-object JSON, malformed/trailing data, oversized input, and a
-producer that leaves the pipe open fail before a broker request is sent.
-Input errors use the generic broker error message and do not echo the payload.
+`banto broker call <operation>` は、標準入力から UTF-8 の JSON オブジェクトを
+ちょうど1つ読み、EOF を要求します。引数がない操作でも `{}` を明示します。
+空の入力はエラーです。`banto broker health` は標準入力を読みません。
+
+対話端末は待たずに拒否します。パイプまたはリダイレクトされたファイルは、
+完全なオブジェクトと EOF を5秒以内に届ける必要があります。上限は
+`MAX_MESSAGE`（8 MiB）です。その期限内の遅延や分割入力は受け付けます。
+空入力、オブジェクト以外、壊れた JSON、末尾の余分なデータ、深すぎる入れ子、
+上限超過、EOF を送らずにパイプを開いたままにする場合は、ブローカーへ
+リクエストを送る前に失敗します。失敗時のメッセージは固定で、入力内容は
+エコーしません。
 
 ```sh
-printf '%s' '{}' | banto broker call health
+printf '%s' '{}' | banto broker call health   # call 経路。引数なしは {} と EOF
+banto broker health                           # このコマンドは stdin を読まない
 ```
