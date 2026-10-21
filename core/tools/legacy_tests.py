@@ -157,8 +157,8 @@ def child(args):
     manifest_path = args.manifest
     manifest = json.loads(manifest_path.read_text())
     before = hashes(repo)
-    if before != manifest["files"] or len(before) != 41 or manifest["test_file_count"] != 41:
-        raise SystemExit("original 41 test files differ from manifest; not running")
+    if before != manifest["files"] or len(before) != manifest["test_file_count"]:
+        raise SystemExit("legacy test files differ from the compatibility manifest; not running")
     metadata = {"source_commit": manifest["source_commit"], "test_file_count": len(before),
                 "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
                 "tests_sha256": before, "hardware_tests": HARDWARE_TESTS,

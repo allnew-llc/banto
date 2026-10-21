@@ -1,6 +1,16 @@
 {
   "source_commit": "a7d157c9ff2e243636bb318e554326861a66a138",
-  "test_file_count": 41,
+  "test_file_count": 43,
+  "reconciliation": {
+    "main_baseline": "a7d157c9ff2e243636bb318e554326861a66a138",
+    "sealed_test_branch": "codex/fix-sealed-test-pool",
+    "changed_test_files": [
+      "tests/test_native_helper_transport.py",
+      "tests/test_sealed_pool_lifetime.py",
+      "tests/test_sealed_signer.py"
+    ],
+    "unchanged_note": "Every other legacy test file still matches main_baseline. The sealed changes fix pool lifetime and bound signed-helper IPC. Fake-framework passes are not physical Secure Enclave results."
+  },
   "files": {
     "tests/conftest.py": "a2941ed3c2ba1c9ad9999bdbd8725fcaa83d5d19286c68e470cfcf118158f5b2",
     "tests/test_broker.py": "b4115662e300ef0b82a17db756cb7848b7fcc45ad327343f539170da1b99e8bd",
@@ -15,10 +25,12 @@
     "tests/test_keychain_account.py": "3393bb87156864138f685e5e57a393183b692b2bdfe886a75b6be12da32e15b6",
     "tests/test_lease.py": "07cf91c81629db4775bc358700a546c6ac40c9774906fe95298cfbedfbdbd117",
     "tests/test_model_profiles.py": "2ca1bb0e8c36f4e90ec78da1855b555d40d4aa9e0b043e891516d4901bd61183",
+    "tests/test_native_helper_transport.py": "e194d5d397fe24faf6f66d7fe433fbb5a5dc4130a0af1297211c9f761711bf5a",
     "tests/test_pricing_health.py": "b570eda7082312f3881f1263e37b2356fd99a3f6d943a2efd8cc0297079ca6c9",
     "tests/test_recommend_profile.py": "e6ad893d41c992e821baa3291d24b52c7d6f38095ce30d0cace2e27b4c37ff25",
     "tests/test_register_popup.py": "556a69cc42ed1e5909808604e496c521fce4e0645d223d8e2a34a1b6eb02b02a",
-    "tests/test_sealed_signer.py": "dd017a38c9c6f9fe88ffd09e8a0325cbc2ce14a62f4bfce8e3e829acd6fadaf9",
+    "tests/test_sealed_pool_lifetime.py": "28ca1b9dcc1a49abe61804b9807e05aeb477ced8352c98807d75d3196db5d000",
+    "tests/test_sealed_signer.py": "3dd148c7f6f9852fc88fa91e906d213f7b7c4e41e6cc80b6c73531e1ff5bdcce",
     "tests/test_sync/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "tests/test_sync/test_browser_issuer.py": "4922eff8d08ab9908045796ce9b91eab17fd3445e579e949aa4e5c53fc2795c1",
     "tests/test_sync/test_capabilities.py": "3c5743193150af1272e728d7d39eeda6503ee1627b0c3b159192e1ab9bf70209",

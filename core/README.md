@@ -44,10 +44,15 @@ core の署名付き tag、配布先、公開は所有者の別承認で行い�
 ## 検証
 
 `core/tests` はダミー値と mock を使う単体試験です。実 Keychain、Touch ID、
-provider API、launchctl を呼びません。既存 `tests/` は変更せずに比較します。
+provider API、launchctl を呼びません。既存 `tests/` は
+`compatibility-tests.json` の SHA と照合します。照合対象は main
+`a7d157c` の原本に、PR #35 の sealed 試験修正（pool の寿命、署名付き
+ヘルパー IPC の上限）と、その Linux 上の偽フレームワーク試験
+`tests/test_native_helper_transport.py` / `tests/test_sealed_pool_lifetime.py`
+を加えたものです。それ以外の legacy 試験ファイルは main と同一です。
+偽フレームワーク試験の成功は、実 Secure Enclave の非抽出性の合格ではありません。
 モノレポのルートでは `make verify PYTHON=<pytest/MCP入りPython>` が
-core の単体試験と既存 suite を実行します。既存 suite の原本 41 ファイルは
-`compatibility-tests.json` の SHA と照合します。`core/tools/legacy_tests.py` は
+core の単体試験と既存 suite を実行します。`core/tools/legacy_tests.py` は
 実 Keychain・外部接続・未許可コマンドの呼出しを検出し、原本のダミー lease 試験に必要な
 固定コマンドと local fixture 接続だけを許可します。shell 内のパスは安全な ASCII 文字・
 絶対正規化パスに限定し、実行ファイル・argv・cwd・PATH と loader 環境変数も照合します。
@@ -76,7 +81,11 @@ provider を外部通信前に拒否します。この2点は抽出元の内部 
 
 本人が実機2件の作成・署名・検証を確認し、元から存在する sealed 鍵の発見と
 socket・Keychain service prefix・LaunchAgent label・sealed tag の互換を実機確認します。
-元の非抽出試験にある pool 引数欠陥の修正は別 PR で扱い、この PR の原本41試験は
-変更しません。mock/静的照合や安全 runner の skip を実機確認の代用にしません。
-PyPI の上記確認、本人のマージと tag まで Phase 3 は未完了です。
+非抽出試験の pool 引数は PR #35 と同じ修正をこのブランチの
+`tests/test_sealed_signer.py` に取り込んであります。ヘルパーは親プロセスの
+資格情報を継がず、標準出力は JSON にする前に 8192 文字で打ち切ります。
+mock・静的照合・安全 runner の skip を実機確認の代用にしません。
+`banto broker call` の stdin 上限と 5 秒の EOF は PR #33 側の修正で、このブランチの
+`banto/broker.py` は従来の `json.load(sys.stdin)` のままです。両方をマージするときは
+`main()` を突き合わせてください。PyPI の上記確認、本人のマージと tag まで Phase 3 は未完了です。
 grader の OS 隔離は Phase 5 の別条件として管理します。
