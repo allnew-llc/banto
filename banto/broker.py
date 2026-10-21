@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import select
 import socket
 import socketserver
 import struct
@@ -396,6 +397,38 @@ def install() -> None:
     print(json.dumps({"installed": True, "plist": str(plist_path), "python": sys.executable}))
 
 
+# A pipe must deliver a complete object and EOF before any operation is sent.
+# In particular, temporary silence must never become an empty argument object.
+CALL_STDIN_TIMEOUT = 5.0
+
+
+def _read_call_arguments() -> dict:
+    if sys.stdin.isatty():
+        raise ValueError("call requires a JSON object piped on stdin")
+    fd = sys.stdin.fileno()
+    deadline = time.monotonic() + CALL_STDIN_TIMEOUT
+    payload = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            raise ValueError("call stdin did not reach EOF before the deadline")
+        chunk = os.read(fd, min(65536, MAX_MESSAGE + 1 - len(payload)))
+        if not chunk:
+            break
+        payload.extend(chunk)
+        if len(payload) > MAX_MESSAGE:
+            raise ValueError("call stdin is too large")
+    try:
+        # RecursionError's traceback is huge and must not replace the generic
+        # client error. The message itself does not include the document.
+        arguments = json.loads(payload.decode("utf-8"))
+    except RecursionError:
+        raise ValueError("call stdin is too deep") from None
+    if not isinstance(arguments, dict):
+        raise ValueError("call stdin must be a JSON object")
+    return arguments
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["serve", "install", "health", "enable", "disable", "call", "audit"])
@@ -432,7 +465,7 @@ def main() -> None:
             operation = "health" if args.command == "health" else args.operation
             if not operation:
                 parser.error("call requires an operation; arguments are a JSON object on stdin")
-            arguments = {} if args.command == "health" else json.load(sys.stdin)
+            arguments = {} if args.command == "health" else _read_call_arguments()
             print(json.dumps(BrokerClient().call(operation, **arguments), ensure_ascii=False))
     except (BrokerError, OSError, ValueError, TypeError):
         print("Broker command failed; no direct Keychain fallback. Check service and operation arguments.", file=sys.stderr)

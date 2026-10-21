@@ -30,8 +30,9 @@ def test_versions_agree():
     lock = tomllib.loads((ROOT / "uv.lock").read_text())
     locked = [p["version"] for p in lock["package"] if p["name"] == "banto"]
     assert locked == [pyproject]
-    first = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(), re.MULTILINE).group(1)
-    assert first == pyproject
+    headings = re.findall(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(), re.MULTILINE)
+    released = [item for item in headings if item.lower() != "unreleased"]
+    assert released and released[0] == pyproject
 
 
 @pytest.mark.parametrize("readme", READMES, ids=lambda p: p.name)

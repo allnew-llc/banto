@@ -406,6 +406,8 @@ banto broker audit --verify      # ハッシュチェーン監査ログを検証
 
 banto更新後はサービスを再起動します: `launchctl kickstart -k gui/$(id -u)/work.allnew.banto.broker`。`banto broker disable` で従来モードに戻ります。詳細: [docs/local-broker.md](./docs/local-broker.md)。
 
+`banto broker call <operation>` は標準入力から UTF-8 の JSON オブジェクトを1つ読み、5秒以内の EOF を要求します（上限 8 MiB）。端末入力、空の stdin、オブジェクト以外、末尾データ、深すぎる入れ子、開いたままのパイプは、ブローカーへ送る前に拒否します。引数がない操作は `{}` を送ってください。失敗時は固定メッセージのみで、入力はエコーしません。`banto broker health` は標準入力を読みません。
+
 **`api_request`**（`BrokerClient().call("api_request", provider="openai"|"anthropic", payload={...})` またはMCPの `banto_api_request`）はOpenAI Responses / Anthropic Messagesの非ストリーミング呼び出しです。宛先・認証ヘッダー・リダイレクトは固定で、リモートツールやストリーミングは拒否します。予算ゲーティングが有効な場合:
 
 - payloadに `max_output_tokens`（OpenAI）/ `max_tokens`（Anthropic）が必要で、モデルは `pricing.json` に `per_token` エントリが必要です（なければ `unpriced_model`）
