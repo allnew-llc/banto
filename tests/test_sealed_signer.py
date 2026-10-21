@@ -49,9 +49,12 @@ def test_payload_must_be_bytes():
 def _signed_native_case(operation):
     """Explicit signed-host path. No probe or access to any banto-* key here.
 
-    The owner runner verifies/pins this host before setting the environment.
+    The owner runner verifies and pins this host before setting the environment.
     This proves the helper native path, not the unsigned Python ctypes path.
+    The helper receives an allowlisted environment and a capped stdout so parent
+    credentials are not inherited and helper output is not parsed or echoed.
     """
+    stdout_max = 8192
     helper = os.environ.get("BANTO_NATIVE_HELPER")
     if not helper:
         if os.environ.get("BANTO_NATIVE_OWNER_REQUIRED") == "1":
@@ -65,16 +68,44 @@ def _signed_native_case(operation):
     owner_presence = operation == "native-roundtrip" and os.environ.get("BANTO_NATIVE_MODE") != "preflight"
     if operation == "native-roundtrip" and not owner_presence:
         operation = "native-probe"
+    request = json.dumps({"operation": operation, "key_id": key_id})
+    allowed_env = {}
+    for key in ("HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "LOGNAME"):
+        value = os.environ.get(key)
+        if isinstance(value, str) and 0 < len(value) <= 4096 and "\x00" not in value:
+            allowed_env[key] = value
+    proc = None
+    failed = False
+    reply = None
+    returncode = None
     try:
-        result = subprocess.run([helper], input=json.dumps({"operation": operation, "key_id": key_id}),
-                                text=True, capture_output=True, timeout=180, check=False)
-        reply = json.loads(result.stdout)
+        proc = subprocess.Popen(
+            [helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, env=allowed_env)
+        proc.stdin.write(request)
+        proc.stdin.close()
+        stdout = proc.stdout.read(stdout_max + 1)
+        if len(stdout) > stdout_max:
+            proc.stdout.close()
+            proc.wait(timeout=30)
+            failed = True
+        else:
+            returncode = proc.wait(timeout=180)
+            reply = json.loads(stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
+        failed = True
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                pass
+    # Fail outside the except so a helper payload cannot chain into the report.
+    if failed or not isinstance(reply, dict):
         pytest.fail("signed native helper IPC failed", pytrace=False)
-    # Never surface stdout/stderr/native descriptions, even on assertion failures.
-    valid = (result.returncode == 0 and isinstance(reply, dict)
-             and reply.get("status") == "native_passed" and type(reply.get("os_status")) is int
-             and reply.get("os_status") == 0 and reply.get("user_presence_required") is owner_presence
+    valid = (returncode == 0 and reply.get("status") == "native_passed"
+             and type(reply.get("os_status")) is int and reply.get("os_status") == 0
+             and reply.get("user_presence_required") is owner_presence
              and reply.get("cleanup_verified") is True)
     if not valid:
         pytest.fail("signed native case failed (no skip)", pytrace=False)
@@ -112,17 +143,21 @@ def test_enclave_roundtrip_and_non_extractable():
         assert ecdsa_p256.verify(bytes.fromhex(pub["public_key_x963_hex"]), msg, der) is True
 
         # The private key must be NON-EXTRACTABLE: asking the keychain for its data fails.
+        # One pool owns every object this query creates. Drain it on both paths.
+        # A non-null copy result is caller-owned; release it without reading bytes.
         pool = []
+        out = ctypes.c_void_p()
         try:
             query = sealed_signer._cfdict([
                 (sealed_signer._const(sealed_signer._SEC, "kSecClass"), sealed_signer._const(sealed_signer._SEC, "kSecClassKey")),
                 (sealed_signer._const(sealed_signer._SEC, "kSecAttrApplicationTag"), sealed_signer._cfdata(sealed_signer._tag(key_id), pool)),
                 (sealed_signer._const(sealed_signer._SEC, "kSecReturnData"), sealed_signer._const(sealed_signer._CF, "kCFBooleanTrue")),
             ], pool)
-            out = ctypes.c_void_p()
             status = sealed_signer._SEC.SecItemCopyMatching(query, ctypes.byref(out))
             assert not out and status != 0  # no private-key bytes returned
         finally:
+            if out:
+                sealed_signer._CF.CFRelease(out)
             sealed_signer._drain(pool)
     finally:
         sealed_signer.delete_signing_key(key_id)
